@@ -1391,7 +1391,13 @@ ggsave('Misc_Plots/Population_Percent_Cells_with_IVGs.pdf',
 
 ```
 
-```{r Figure 4 Data Processing, eval = TRUE}
+The following code chunk describes the process of summarizing the full simulation data from the individual-based model of viral replication in terms of peak Productive Cell, Virions, and Semi-Infected cell numbers, as well as the extraction of the data from each hour of the simulations, followed by the extraction of hour-by-hour data from each simulation for plotting the dynamics of infection in Supplementary Figure 2.
+
+The full data set is 1.75 GB, and so was not uploaded to Github, but is available upon request. The script to generate the full data set can be found in the "Simulations" folder.
+
+```{r Individual-based Model Data Processing, eval = FALSE}
+
+
 NTJ21 = read.csv(file = file.path(Data.Path,"NTJ_Sim21_Data.csv"))
 
 NTJ21.Peak = NTJ21 %>%
