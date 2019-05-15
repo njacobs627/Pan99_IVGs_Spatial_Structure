@@ -1,0 +1,3036 @@
+---
+title: "Figures"
+author: "NTJ"
+date: "5/14/2019"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(knitr) # Version 1.21
+require(drc) # Version 3.0-1
+require(tidyverse) # Version 1.2.1
+require(ggthemes) # Version 4.10
+require(latex2exp) # Version
+require(viridis) # Version 0.5.1
+require(reshape2) # Version 1.4.3
+require(Matrix) # Version 1.2-15
+require(gridExtra) # Version 2.3
+require(scales) # Version 1.0.0
+require(ggridges) # Version 0.5.1
+require(robustlmm) # Version 2.3
+require(lme4) # Version 1.1-20
+require(lmerTest) # Version 0.9-36
+require(dplyr) # Version 0.8.0.1
+require(expm) # Version 0.999-3
+require(sicegar) # Version 0.2.2
+require(ggplot2) # 3.1.0
+
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  legend
+}
+
+Proj.Home = "/Users/Nate/Box Sync/Lowen_Lab/Data_Notebook/Documentation" #For Nate's Macbook Pro
+Data.Path = file.path(Proj.Home,"Data")
+setwd(Proj.Home)
+```
+
+```{r Figure 1, eval = TRUE}
+Pp.Calc = function(SCA.Sub,Rep) { # Calculates segment-specific Pp values
+  # Argument = a matrix with rows of cells and columns (PB2...NS,var.PB2,var.PB1,WT,var)
+  
+  # Need 3 things:
+  # Number var/Helper+                      = A
+  # Number WT/Test+                         = B
+  # Segment-specific segment counts         = Ci
+  # MOI                                     = B/A
+  #     WT segments can only be propagated in var+ cells, so we consider them the denominator.
+  # Pp[i]                                   = ln(1 - C[i]/A) / ln(1 - B/A)
+  
+  require(Matrix)
+  require(dplyr)
+  PB2.Index = which(colnames(SCA.Sub)=="PB2")
+  
+  # Extract Delay = 0 (data where Pan/99-WT and Pan/99-var viruses were added simultaneously) and analyze
+  
+  Delay0 = SCA.Sub %>% filter(Delay == 0)
+  A = sum(Delay0[,"var"]) # A = WT+ Cells
+  B = sum(Delay0[,"WT"]) # B = var+ Cells
+  MOI = B / A # Here, "MOI"" refers to the fraction of WT+ cells
+  C = colSums(Delay0[,PB2.Index:(PB2.Index + 7)]) # Counts of each genome segment from WT virus
+  PP.Sub=log(1 - C / A) / log(1 - MOI)
+  
+  PP.Sub["Avg"] = prod(PP.Sub) ^ (1 / 8)    # Use geometric mean, since product is important
+  PP.Sub["WT.Segments"] = sum(C)
+  PP.Sub["P3.NP"] = sum(Delay0[,"P3.NP"]) / B # Fraction of cells that contain WT PB2, PB1, PA, and NP segments
+  PP.Sub["Segments.Per.Cell"] = sum(C) / (MOI * A) # Average Number of Segments / Cell
+  PP.Sub["Delay"] = 0 # No delay between adding WT virus and var virus
+  PP.Sub["Initial.MOI"] = MOI # In the event of a delay between WT-var, the fraction WT+ in the simultaneous co-inoculation
+  PP.Sub["Time.MOI"] = B / A # In the event of a delay between WT-var, the fraction WT+ at the delay
+  PP.Sub["Expt"] = SCA.Sub[1,"Expt"] # Experimental Replicate (Name)
+  PP.Sub["Rep"] = Rep # Experimental Replicate (Number)
+  
+  PP.Sub
+}
+
+Pp.Calc.2 = function(Test) { # Calculates segment-specific Pp values
+  # Argument = a matrix with rows of cells and columns (PB2...NS,var.PB2,var.PB1,WT,var)
+  
+  # Need 3 things:
+  # Number var/Helper+                      = A
+  # Number WT/Test+                         = B
+  # Segment-specific segment counts         = Ci
+  # MOI                                     = B/A
+  #     WT segments can only be propagated in var+ cells, so we consider them the denominator.
+  # Pp[i]                                   = ln(1 - C[i]/A) / ln(1 - B/A)
+  
+  require(Matrix)
+  PB2.Index = which(colnames(Test)=="PB2")
+  A=sum(Test[,"var"])
+  B=sum(Test[,"WT"])
+  C=colSums(Test[,PB2.Index:(PB2.Index + 7)])
+  PP.Test=log(1-C/A) / log(1-B/A)
+  PP.Test["Avg"]=prod(PP.Test)^(1/8)    # Use geometric mean, since product is important
+  PP.Test["MOI"]=B/A
+  
+  PP.Test
+}
+
+Virion.By.Genotype.Prob=function(SCA.Sub,Virion.Target) {
+  
+  vt=Virion.Target # Function is designed to calculate p(1 virion | Genotype, but could be used for an arbitrary number of virions)
+  PP=Pp.Calc.2(SCA.Sub) # Calculate Pp values
+  MOI=PP["MOI"]
+  PP=PP[1:8]  # Ignore the "Avg" and "MOI" parts
+  V.Num=20 #
+  
+  Cond.Probs=matrix(nrow=256,
+                    ncol=V.Num,
+                    data=0)
+  
+  Gens=lapply(X=1:255,FUN=IntToGenotype)
+  Gens=matrix(unlist(Gens,use.names=FALSE),ncol=8,byrow=TRUE)
+  
+  SF.Probs=matrix(nrow=2,
+                  ncol=8,
+                  data=0)
+  
+  for (v in 1:V.Num) {
+    # pgeom (prob = Pp,q = v - 1) = Cumulative Prob of Success after v trials
+    SF.Probs[2,] = pgeom(prob = PP,q = v-1) #Success Probabilities for each segment (i.e., if a cell is infected with v-1 virions, how likely is it that at least one copy of a given segment is delivered?)
+    SF.Probs[1,] = 1 - SF.Probs[2,] #Failue Probabilities for each segment (i.e., if a cell is infected with v-1 virions, how likely is it that each virion fails to deliver the segment in question?)
+    
+    #Each gene constellation or "genotype" represents a distinct combination of WT segments being present and absent. For 8 segments, 2^8 = 256 different genotypes.
+    
+    Gen.Probs=rep(0,256)
+    for (gen in 0:255) {
+      GT = IntToGenotype(gen) # For example, 1 = 00000001, 42 = 00101010, 255 = 11111111
+      call = cbind(GT+1,1:8)
+      Gen.Probs[gen + 1] = prod(SF.Probs[call])
+    }
+    # Cond.Probs = p(Genotype | # Virions)
+    Cond.Probs[,v]=Gen.Probs
+  }
+  
+  Cond.Probs=cbind(c(1,rep(0,255)),Cond.Probs)
+  #   Cond.Probs = p(Genotype | Virion #) p(B|A)
+  
+  #   Virion.Probs = p(Virion #)          p(A)
+  
+  #   Genotype.Probs = p(Genotype)        p(B)
+  
+  #   Bayes Theorem: p(A|B) = p(B|A) * p(A) / p(B)
+  #   p(1 virion | Genotype) = p(Genotype | 1 virion) * p(1 virion) / p(Genotype)
+  
+  #   "MOI" calculated in Pp Analysis is actually p (X >= 1)
+  #   Need to calculate lambda to parameterize Poisson distribution
+  
+  lambda=-log(1 - MOI)
+  
+  # Need the probability of receiving 0, 1, 2, 3, 4... virions
+  Virion.Probs=matrix(data=rep(dpois(lambda=lambda,x=0:V.Num),each=256),
+                      ncol=V.Num+1,
+                      nrow=256)
+  
+  # Genotype.Probs = Sum(i = 0 - 20) (p(Genotype | i Virions) * p(i Virions))
+  Genotype.Probs = rowSums(Cond.Probs * Virion.Probs)
+  
+  # p(1 virion | Genotype) = p(Genotype | 1 virion) * p(1 virion) / p(Genotype)
+  # vt + 1 is an offset, because column 1 contains p(0 virions), column 2 contains p(1 virion), etc.
+  V.Probs=Cond.Probs[,vt+1] * Virion.Probs[,vt+1] / Genotype.Probs
+  V.Probs
+}
+
+GenotypeToInt = function(Genotype) {
+  sum(Genotype*2^(0:7))
+  # For example, 1 = 00000001 (Only NS present)
+  # 42 = 00101010 (PA, NA, M segments present)
+  # 255 = 11111111 (all segments present)
+}
+
+IntToGenotype = function(Int) {
+  as.numeric(intToBits(Int)[1:8])
+  # For example, 1 = 00000001 (Only NS present)
+  # 42 = 00101010 (PA, NA, M segments present)
+  # 255 = 11111111 (all segments present)
+}
+
+SCA.Cov = function(Test.SCA) { # 
+  
+  PB2.Index = which(colnames(Test.SCA)=="PB2")
+  Flu.Genes = colnames(Test.SCA)[PB2.Index:(PB2.Index+7)]
+  Expts = unique(Test.SCA$Expt)
+  
+  Test.SCA$Weight=0 # To be calculated later, rescaled p1.Virion (sums to 1 for each experiment)
+  Test.SCA$p1.Virion=0 #To be calculated later
+  
+  # Calculate Genotypes of each cell. 0 = NO WT segments, 255 = All 8 WT segments
+  Test.SCA$Genotype=apply(X=Test.SCA[,PB2.Index:(PB2.Index+7)],MARGIN=1,FUN=GenotypeToInt)
+  
+  Pp.Mat=matrix(data = 0,
+                nrow = length(Expts),
+                ncol = 10)
+  
+  colnames(Pp.Mat) = c(Flu.Genes,"Avg","MOI")
+  rownames(Pp.Mat) = str_c("Exp_",1:length(Expts))
+  
+  for (i in 1:length(Expts)) {
+    
+    # Calculate Pp
+    Pp.Mat[i,]=Pp.Calc.2(Test = subset(Test.SCA,Expt==Expts[i]))
+    
+    # Calculate p(1 Virion | Genotype), and Weight (relative p(1|Genotype), sums to 1 in each Expt)
+    Single.Hit <- Virion.By.Genotype.Prob(subset(Test.SCA,Expt==Expts[i]),
+                                          Virion.Target = 1)
+    Test.SCA[Test.SCA[,"Expt"]==Expts[i],"p1.Virion"] <- Single.Hit[Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Genotype"]+1]
+    
+    
+    Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Weight"] <- Single.Hit[Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Genotype"]+1] / sum(Single.Hit[Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Genotype"]+1])
+  }
+  
+  # After calculating p(1 virion) for each cell, use the cov.wt function to calculate the pairwise correlation between each pair of segments.
+  SCA.Ass = cov.wt(x = Test.SCA[,(PB2.Index:(PB2.Index + 7))], wt = Test.SCA[,"p1.Virion"],
+                   cor = TRUE, center = TRUE)
+  return(SCA.Ass)
+  
+}
+
+Weight.Calc = function(Test.SCA) {
+  # Calculate p(1 virion) for each cell, to be used as a weighting factor in the pairwise association analysis
+  PB2.Index = which(colnames(Test.SCA)=="PB2")
+  Flu.Genes = colnames(Test.SCA)[PB2.Index:(PB2.Index+7)]
+  Expts = unique(Test.SCA$Expt)
+  
+  Test.SCA$Weight=0 # To be calculated later, rescaled p1.Virion (sums to 1 for each experiment)
+  Test.SCA$p1.Virion=0 #To be calculated later
+  
+  # Calculate Genotypes of each cell. 0 = NO WT segments, 255 = All 8 WT segments
+  Test.SCA$Genotype=apply(X=Test.SCA[,PB2.Index:(PB2.Index+7)],MARGIN=1,FUN=GenotypeToInt)
+  
+  Pp.Mat=matrix(data = 0,
+                nrow = length(Expts),
+                ncol = 10)
+  
+  colnames(Pp.Mat) = c(Flu.Genes,"Avg","MOI")
+  rownames(Pp.Mat) = str_c("Exp_",1:length(Expts))
+  
+  for (i in 1:length(Expts)) {
+    
+    # Calculate Pp
+    Pp.Mat[i,]=Pp.Calc.2(Test = subset(Test.SCA,Expt==Expts[i]))
+    
+    # Calculate p(1 Virion | Genotype), and Weight (relative p(1|Genotype), sums to 1 in each Expt)
+    Single.Hit <- Virion.By.Genotype.Prob(subset(Test.SCA,Expt==Expts[i]),
+                                          Virion.Target = 1)
+    Test.SCA[Test.SCA[,"Expt"]==Expts[i],"p1.Virion"] <- Single.Hit[Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Genotype"]+1]
+    
+    
+    Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Weight"] <- Single.Hit[Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Genotype"]+1] / sum(Single.Hit[Test.SCA[Test.SCA[,"Expt"]==Expts[i],"Genotype"]+1])
+  }
+  
+  return(Test.SCA)
+  
+}
+
+SCA.Data = read.csv(file.path(Data.Path,"SCA_Full_Data.csv")) %>%
+  filter(Cell.Type =="Test") %>%
+  mutate(WT.Segments = PB2 + PB1 + PA + HA + NP + NA. + M + NS,
+         WT = sign(WT.Segments),
+         var = sign(Help.PB2 * Help.PB1),
+         P3.NP = sign(PB2 * PB1 * PA * NP))
+
+## Calculate Pp values algorithmically ----
+SCA.Expts = unique(SCA.Data$Expt)
+
+Pp.Summary = SCA.Data %>% 
+  filter(Expt == SCA.Expts[1]) %>%
+  Pp.Calc(Rep = 1)
+
+for (i in 2:length(SCA.Expts)) {
+  Pp.Summary = rbind(Pp.Summary,
+                     SCA.Data %>% 
+                       filter(Expt == SCA.Expts[i]) %>%
+                       Pp.Calc(Rep = i))
+}
+rownames(Pp.Summary) = NULL
+Pp.Summary = as.data.frame(Pp.Summary)
+write.csv(Pp.Summary,file = file.path(Data.Path,"Pp_Summary.csv"))
+
+# Pp vs. Length (0 hrs) ----
+Rep.Num = length(SCA.Expts)
+Exp.Pp = Pp.Summary %>% filter(Delay == 0) %>% select(PB2:NS,Rep)
+
+colnames(Exp.Pp)[which(colnames(Exp.Pp)=="NA.")]="NA"
+
+Exp.Pp=melt(Exp.Pp,id=c("Rep"))
+Exp.Pp=Exp.Pp[1:(Rep.Num * 8),]
+
+Segment.Names=c("PB2","PB1","PA","HA","NP","NA","M","NS")
+Segment.Lengths=c(2341,2341,2233,1778,1565,1413,1027,890)
+Lengths=rep(c(2341,2341,2233,1778,1565,1413,1027,890),each=length(unique(Exp.Pp$Rep)))
+
+Exp.Pp=cbind(Exp.Pp,Lengths)
+colnames(Exp.Pp)[which(colnames(Exp.Pp)=="value")]="Pp"
+colnames(Exp.Pp)[which(colnames(Exp.Pp)=="variable")]="Segment"
+
+Exp.Pp$Pp=as.numeric(Exp.Pp$Pp)
+Exp.Pp$Lengths=as.numeric(Exp.Pp$Lengths)
+
+Exp.Pp$Rep = factor(Exp.Pp$Rep,levels = 1:Rep.Num)
+
+# Segment Distribution ----
+# Plot histogram of segments/cell (only WT+ cells) and ECDF
+x = SCA.Data %>%
+  mutate(WT.Segments = as.numeric(WT.Segments)) %>%
+  filter(WT == 1,
+         Delay == 0) %>%
+  dplyr::select(WT.Segments)
+
+WT_at_least = rep(0,8)
+WT_cdf = rep(0,8)
+
+WT_hist = table(x) / nrow(x)
+Max_Freq = max(WT_hist)
+
+for (i in 1:8) {
+  WT_at_least[i] = sum(x >= i) / nrow(x) * Max_Freq
+  WT_cdf[i] = sum(x <= i) / nrow(x) * Max_Freq
+}
+
+
+Segment_Dist = cbind(1:8,WT_at_least,WT_cdf,WT_hist) %>% data.frame
+colnames(Segment_Dist) = c("Segments","At_Least","ECDF","Freq")
+
+ggplot() +
+  geom_bar(data = Segment_Dist,
+           aes(x = Segments,
+               y = Freq),
+           stat = "identity",
+           fill = "lightgray",
+           color = "black") +
+  geom_line(data = Segment_Dist,
+            aes(x = Segments,
+                y = ECDF),
+            color = "red",
+            lwd = 1.2) +
+  labs(x = "Segments / Cell",
+       y = "Individual Frequency") +
+  scale_x_continuous(breaks = 1:8) +
+  scale_y_continuous(sec.axis = sec_axis(~. / Max_Freq, name = "Cumulative Frequency")) +
+  
+  theme(text=element_text(size=12,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.title.y.right = element_text(color = "red"),
+        axis.text.y.right = element_text(color = "red"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave("Misc_Plots/Segment_Distribution.pdf",
+       dpi = 300,
+       width = 5,
+       height = 4,
+       unit = "in")
+# Stock Plot ----
+Fig.1 = ggplot() +
+    theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = c(2,2))
+# Figure 1A: Pp by Segment ----
+
+Pp_Error = Exp.Pp %>%
+  group_by(Segment) %>%
+  dplyr::summarise(Pp_Mean = mean(Pp),
+            Pp_SE = sd(Pp) / sqrt(length(Pp)))
+
+Fig.1 +
+  geom_jitter(data = Exp.Pp,
+              aes(x = Segment,
+                  y = Pp,
+                  color = Rep),
+              size = 2) +
+  geom_crossbar(data = Pp_Error,
+                aes(x = Segment,
+                    y = Pp_Mean,
+                    ymin = Pp_Mean - 1.96 * Pp_SE,
+                    ymax = Pp_Mean + 1.96 * Pp_SE),
+                fill = "darkgray",
+                alpha = 0.5) +
+  scale_y_continuous(limits=c(0,1.05),breaks=0:5/5) +
+    annotate("text",x = 3, y = 0.99,size = 5,label = TeX("\\textbf{$P_P$ = 0.58 (0.57 - 0.59)}")) +
+  labs(y=expression(bold(paste("Probability of Detection (P"[bold("P")],")"))),
+       x="Segment",
+       color="Replicate") +
+  scale_color_tableau(palette = "Tableau 20")
+
+ggsave("Figures/1A_Pp_By_Segment.pdf",
+       dpi = 300,
+       width = 5,
+       height = 5,
+       unit = "in")
+
+Legend.1AB = Fig.1 +
+  geom_jitter(data = Exp.Pp,
+              aes(x = Segment,
+                  y = Pp,
+                  color = Rep),
+              size = 2) +
+  geom_crossbar(data = Pp_Error,
+                aes(x = Segment,
+                    y = Pp_Mean,
+                    ymin = Pp_Mean - 1.96 * Pp_SE,
+                    ymax = Pp_Mean + 1.96 * Pp_SE),
+                fill = "darkgray",
+                alpha = 0.5) +
+  scale_color_tableau(palette = "Tableau 20") +
+  scale_y_continuous(limits=c(0,1.05),breaks=0:5/5) +
+    annotate("text",x = 4, y = 0.99,size = 5,label = TeX("\\textbf{$P_P$ = 0.58 (0.57 - 0.59)}")) +
+  labs(y=expression(bold(paste("Probability of Detection (P"[bold("P")],")"))),
+       x="Segment",
+       color="Replicate") +
+  theme(legend.position = "right")
+
+ggsave(g_legend(Legend.1AB),
+       file = "Figures/1AB_Legend.pdf",
+       dpi = 300,
+       width = 2,
+       height = 5,
+       unit = "in")
+
+# Predicted Reassortment based on Pp values----
+
+FM.Data = read.table(file = file.path(Data.Path,"Fonville_Marshall_Reassortment_Data.csv"),header=TRUE,sep=",")
+
+# Predictions generated by experimentally measured Pp values
+Pp_Reassortment_Predict = read.csv(file = file.path(Data.Path,"Exp_Pp_Reassortment.csv"),header = TRUE, sep = ",")
+
+# Expected reassortment frequencies if genomes were always complete (Pp = 1)
+Pp1_Reassortment_Predict = read.csv(file = file.path(Data.Path,"Pp1_Reassortment.csv"),header = TRUE, sep = ",")
+
+X="Expressing.HA"
+Y="Reassortant.Percent"
+
+Fig.1 +
+  geom_line(data=Pp_Reassortment_Predict,aes(y=Reassortant.Percent,x=Expressing.HA,group=as.factor(Rep),color=as.factor(Rep)),lwd=1.2) +
+  geom_line(data = Pp1_Reassortment_Predict, aes(x = Expressing.HA, y = Reassortant.Percent), lty = 2, lwd = 1.2) +
+  geom_point(data=FM.Data,aes_string(x=X,y=Y),size=4,col="black") +
+  annotate("text",x = 75, y = 15,size = 6,label = TeX("\\textbf{$\\P_P$ = 1}")) +
+  labs(x=expression(bold("% Cells HA"^"+")),
+       y="% Reassortment",
+       color="Rep") +
+    scale_color_tableau(palette = "Tableau 20") +
+  guides(color = FALSE) +
+  scale_x_continuous(limits=c(0,100)) +
+  scale_y_continuous(limits=c(0,100))
+
+ggsave("Figures/1B_Predicted_Reassortment.pdf",
+       dpi = 300,
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Figure 1C: Pairwise Segment Correlations ----
+# Calculate Genotype #s and p(1 virion | Genotype)
+SCA.Weights = Weight.Calc(Test.SCA = SCA.Data %>% filter(Delay == 0,
+                                         Cell.Type =="Test",
+                                         var == 1))
+
+SCA.Ass = SCA.Cov(Test.SCA = SCA.Data %>% filter(Delay == 0,
+                                         Cell.Type =="Test",
+                                         var == 1))
+
+# Plotting Weights ----
+
+ggplot() +
+  geom_jitter(data = SCA.Weights,
+             aes(x = WT.Segments,
+                 y = p1.Virion))
+
+ggplot() +
+  geom_density_ridges(data = SCA.Weights %>% filter(WT.Segments >= 1),
+                      aes(x = p1.Virion,
+                          y = factor(WT.Segments,levels = rev(1:8))),
+                      fill = "navy",
+                      alpha = 0.8,
+                      scale = 2) +
+  scale_x_continuous(limits = c(-0.05,1.08),
+                     breaks = c(0,0.25,0.5,0.75,1.0)) +
+  labs(x = "p (1 Virion)",
+       y = "# WT Segments Detected") +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave("Figures/Supp1_Weight_by_Segment.pdf",
+       dpi = 300,
+       width = 5,
+       height = 4,
+       unit = "in")
+
+# Plotting Correlation ----
+Flu.Genes = c("PB2","PB1","PA","HA","NP","NA","M","NS")
+#Flu.Genes[6]="NA"
+Sum.Names=c("Index","Pair","X.Num","Y.Num","X","Y","r","r2","p")
+Sum.df=matrix(data=0,nrow=64,ncol=length(Sum.Names))
+colnames(Sum.df)=Sum.Names
+Sum.df[,"Index"]=1:64
+Sum.df[,"X"]=rep(Flu.Genes,each=8)
+Sum.df[,"Y"]=rep((Flu.Genes),times=8)
+Sum.df[,"r"]=as.numeric(SCA.Ass$cor)
+
+Sum.df=as.data.frame(Sum.df)
+Sum.df$r = as.numeric(SCA.Ass$cor)
+Sum.df$r2 = as.numeric(Sum.df$r * Sum.df$r)
+Sum.df$X=factor(Sum.df$X,levels=Flu.Genes)
+Sum.df$Y=factor(Sum.df$Y,levels=rev(Flu.Genes))
+
+Sum.df$p = pmin((1 - pchisq(Sum.df$r2 * sum(SCA.Weights$p1.Virion), df = 3)) * 28, 1)
+for (row in 1:8) {
+  for (col in 1:8) {
+    Pair.Index=(row-1)*8+col
+    if (col<=row) {
+      Sum.df[Pair.Index,"r2"]=-1
+    }
+  }
+}
+
+Sum.df=Sum.df[Sum.df[,"X"]!="NS",]
+Sum.df=Sum.df[Sum.df[,"Y"]!="PB2",]
+Sum.df=Sum.df[Sum.df[,"r2"]!=-1,]
+
+ggplot() +
+  coord_equal() +
+  geom_tile(data=Sum.df,aes(x=X,
+                            y=(Y),
+                            fill=r)) +
+  geom_text(data = Sum.df %>% filter(p < 0.05),
+            aes(x = X,
+                y = Y,
+                label = round(r,2)),
+            color = "yellow",
+            size = 5) +
+  scale_fill_viridis(end = max(Sum.df$r), option = "inferno") +
+  labs(x=NULL,
+       y=NULL,
+       fill=expression(bold("r")^bold(""))) +
+  theme(legend.position="NA",
+        text=element_text(size=14,face="bold"),
+        plot.title=element_text(size=rel(2),face="bold"),
+        legend.title.align=3,
+        legend.title=element_text(size=rel(1.5),face="bold",vjust=0),
+        legend.text=element_text(size=rel(1.2),face="bold",vjust=0),
+        legend.key.width=unit(2,"cm"),
+        axis.text.x = element_text(size=rel(1.5),vjust = .5,hjust=.5,face="bold",color = "black", margin=margin(5,0,0,0), angle=0),
+        axis.text.y = element_text(size=rel(1.5),face="bold",color = "black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line=element_blank(),
+        strip.text.x = element_text(size=rel(1),angle=0,face="bold"),
+        strip.text.y = element_text(size=rel(1),angle=0,face="bold"),
+        strip.background = element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.background = element_blank())
+
+ggplot() +
+  coord_equal() +
+  geom_tile(data=Sum.df,aes(x=X,
+                            y=(Y),
+                            fill=r2)) +
+  geom_text(data = Sum.df %>% filter(p < 0.05),
+            aes(x = X,
+                y = Y,
+                label = round(r2,2)),
+            color = "yellow",
+            size = 5) +
+  scale_fill_viridis(end = max(Sum.df$r2), option = "inferno") +
+  labs(x=NULL,
+       y=NULL,
+       fill=expression(bold("r")^bold(""))) +
+  theme(legend.position="NA",
+        text=element_text(size=14,face="bold"),
+        plot.title=element_text(size=rel(2),face="bold"),
+        legend.title.align=3,
+        legend.title=element_text(size=rel(1.5),face="bold",vjust=0),
+        legend.text=element_text(size=rel(1.2),face="bold",vjust=0),
+        legend.key.width=unit(2,"cm"),
+        axis.text.x = element_text(size=rel(1.5),vjust = .5,hjust=.5,face="bold",color = "black", margin=margin(5,0,0,0), angle=0),
+        axis.text.y = element_text(size=rel(1.5),face="bold",color = "black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line=element_blank(),
+        strip.text.x = element_text(size=rel(1),angle=0,face="bold"),
+        strip.text.y = element_text(size=rel(1),angle=0,face="bold"),
+        strip.background = element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.background = element_blank())
+
+ggsave("Figures/1C_Pairwise_Correlation_r2.pdf",
+       dpi = 300,
+       width = 5,
+       height = 5,
+       unit = "in")
+
+Legend.1C = ggplot() +
+  coord_equal() +
+  geom_tile(data=Sum.df %>% mutate(r2 = r2 / max(r2)),aes(x=X,
+                            y=(Y),
+                            fill=r2)) +
+  scale_fill_viridis(begin = 0, end = 1, option = "inferno") +
+  labs(x=NULL,
+       y=NULL,
+       fill=expression(bold("r")^bold("2"))) +
+  theme(text=element_text(size=14,face="bold"),
+        plot.title=element_text(size=rel(2),face="bold"),
+        legend.title.align=3,
+        legend.title=element_text(size=rel(1.5),face="bold",vjust=0),
+        legend.text=element_text(size=rel(1.2),face="bold",vjust=0),
+        legend.key.width=unit(2,"cm"),
+        legend.position = "bottom",
+        axis.text.x = element_text(size=rel(1.5),vjust = .5,hjust=.5,face="bold",color = "black", margin=margin(5,0,0,0), angle=0),
+        axis.text.y = element_text(size=rel(1.5),face="bold",color = "black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line=element_blank(),
+        strip.text.x = element_text(size=rel(1),angle=0,face="bold"),
+        strip.text.y = element_text(size=rel(1),angle=0,face="bold"),
+        strip.background = element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.background = element_blank())
+
+ggsave(g_legend(Legend.1C),
+       file = "Figures/1C_Legend_r2.pdf",
+       dpi = 300,
+       width = 5,
+       height = 2,
+       unit = "in")
+
+# Pp CI Calculation ----
+Pp.Summary %>% select(PB2:NS) %>%
+  melt %>%
+  rename(Pp = value,
+         Segment = variable) %>%
+  summarise(Pp.Mean = mean(Pp),
+            Pp.se = sd(Pp)/length(Pp)) %>%
+  mutate(Pp.Min = Pp.Mean - 1.96 * Pp.se,
+         Pp.Max = Pp.Mean + 1.96 * Pp.se)
+
+Pp.Summary %>% select(Avg) %>%
+  summarise(Pp.Mean = mean(Avg),
+            Pp.se = sd(Avg)/length(Avg)) %>%
+  mutate(Pp.Min = Pp.Mean - 1.96 * Pp.se,
+         Pp.Max = Pp.Mean + 1.96 * Pp.se)
+
+# 0.58 (0.57 - 0.59)    2 digits
+
+```
+
+```{r Figure 1B Fonville Reassortment Model, eval = FALSE}
+
+CellInfection=function(Cell.Num,MOI,Cell.Type,Pp) {
+  
+  set.seed(627) #
+  
+  Cell.Names = c(
+    "MOI","Cell.Type",
+    "Cell","Infected","Co.Infected","Productive","Productive.Co.Infected","Poly","Surface.HA","Inf.A","Inf.B",
+    "pParent.A","pParent.B","pReassort","pHN.Reassort",
+    "PB2","PB1","PA","HA","NP","NA","M","NS",
+    "A.PB2","A.PB1","A.PA","A.HA","A.NP","A.NA","A.M","A.NS",
+    "B.PB2","B.PB1","B.PA","B.HA","B.NP","B.NA","B.M","B.NS",
+    "Copy.A.PB2","Copy.A.PB1","Copy.A.PA","Copy.A.HA","Copy.A.NP","Copy.A.NA","Copy.A.M","Copy.A.NS",
+    "Copy.B.PB2","Copy.B.PB1","Copy.B.PA","Copy.B.HA","Copy.B.NP","Copy.B.NA","Copy.B.M","Copy.B.NS",
+    "Copy.PB2","Copy.PB1","Copy.PA","Copy.HA","Copy.NP","Copy.NA","Copy.M","Copy.NS",
+    "Six","HA.Neg","NS.Neg"
+  )
+  Cells = matrix(nrow = Cell.Num,
+                 ncol = length(Cell.Names),
+                 data = 0)
+  
+  colnames(Cells) = Cell.Names
+  
+  Cells[, "Cell"] = seq(1, Cell.Num)
+  Cells[, "MOI"] = MOI
+  
+  withA = sort(ceiling(runif(n = MOI * Cell.Num) * Cell.Num))
+  withB = sort(ceiling(runif(n = MOI * Cell.Num) * Cell.Num))
+  
+  x = table(withA)
+  x_index = as.numeric(names(x))
+  x_values = as.numeric(x)
+  Cells[x_index, "Inf.A"] = x_values
+  
+  x = table(withB)
+  x_index = as.numeric(names(x))
+  x_values = as.numeric(x)
+  Cells[x_index, "Inf.B"] = x_values
+  
+  Cells[, "Co.Infected"] = (Cells[, "Inf.A"] * Cells[, "Inf.B"] > 0)
+  Cells[, "Infected"] = (Cells[, "Inf.A"] + Cells[, "Inf.B"] > 0)
+  Cells[, "pParent.A"] = 1
+  Cells[, "pParent.B"] = 1
+  Cells[, "pHN.Reassort"] = 1
+  
+  A.PB2.Index = which((colnames(Cells)) == "A.PB2")
+  PB2.Index = which((colnames(Cells)) == "PB2")
+  
+  for (segment in 1:8) {
+    x = table(sort(sample(
+      withA,
+      size = length(withA) * Pp[segment],
+      replace = FALSE
+    )))
+    x_index = as.numeric(names(x))
+    x_values = as.numeric(x)
+    
+    Cells[x_index, A.PB2.Index + segment - 1] = x_values > 0     #Boolean Presence/Absence of Segment, A strain
+    Cells[x_index, A.PB2.Index + segment - 1 + 16] = x_values     #Copy Number of each segment, A strain
+    
+    x = table(sort(sample(
+      withB,
+      size = length(withB) * Pp[segment],
+      replace = FALSE
+    )))
+    x_index = as.numeric(names(x))
+    x_values = as.numeric(x)
+    
+    Cells[x_index, A.PB2.Index + segment - 1 + 8] = x_values > 0     #Boolean Presence/Absence of Segment, B strain
+    Cells[x_index, A.PB2.Index + segment - 1 + 16 + 8] = x_values     #Copy Number of each segment, B strain
+    
+    Cells[, A.PB2.Index + segment - 1 + 16 + 8 + 8] = Cells[, A.PB2.Index + segment - 1 + 16] + Cells[, A.PB2.Index + segment - 1 + 16 + 8] #Copy number of each segment, irrespective of source
+    Cells[, PB2.Index + segment - 1] = (Cells[, A.PB2.Index + segment - 1] +
+                                          Cells[, A.PB2.Index + segment - 1 + 8]) > 0  #Presence/Absence of Gene, irrespective of source
+    
+    Cells[, "pParent.A"] = Cells[, "pParent.A"] * (Cells[, A.PB2.Index + segment -
+                                                           1 + 16] / Cells[, A.PB2.Index + segment - 1 + 16 + 8 + 8])
+    Cells[, "pParent.B"] = Cells[, "pParent.B"] * (Cells[, A.PB2.Index + segment -
+                                                           1 + 16 + 8] / Cells[, A.PB2.Index + segment - 1 + 16 + 8 + 8])
+  }
+  
+  Cells[, "Poly"] = Cells[, "PB2"] * Cells[, "PB1"] * Cells[, "PA"] * Cells[, "NP"]
+  Cells[, "Surface.HA"] = Cells[, "Poly"] * Cells[, "HA"]
+  Cells[, "Productive"] = Cells[, "Surface.HA"] * Cells[, "M"] * Cells[, "NS"] *
+    Cells[, "NA"]
+  Cells[, "Productive.Co.Infected"] = Cells[, "Productive"] * Cells[, "Co.Infected"]
+  Cells[, "pReassort"] = 1 -
+    Cells[, "pParent.A"] -
+    Cells[, "pParent.B"]
+  Cells[, "pHN.Reassort"] = 1 -
+    (Cells[, "Copy.A.HA"] / Cells[, "Copy.HA"]) * (Cells[, "Copy.A.NA"] / Cells[, "Copy.NA"]) -
+    (Cells[, "Copy.B.HA"] / Cells[, "Copy.HA"]) * (Cells[, "Copy.B.NA"] / Cells[, "Copy.NA"])
+  
+  Cells
+}
+
+### Parameters ----
+
+Exp.Pp.2 = read.csv(file.path(Data.Path,"Pp_Summary.csv"),na.strings=c("","-"))  %>% filter(Delay == 0)
+
+PB2.Index = which(colnames(Exp.Pp.2) == "PB2")
+
+Pp = Exp.Pp.2[,PB2.Index:(PB2.Index + 7)]
+
+Rep.Num=nrow(Pp)
+
+rownames(Pp)=as.character(1:Rep.Num)
+
+MOI=matrix(data=rep(c(.001,.01,.05,.1,.2,.3,.4,.5,.6,.7,.8,.9,1,1.5,2,5,10),Rep.Num), #Range of MOIs
+          byrow=TRUE,nrow=Rep.Num)
+
+rownames(MOI)=rownames(Pp)
+
+Flu.Segments=c("PB2","PB1","PA","HA","NP","NA","M","NS")
+
+MOI.Num=ncol(MOI)
+
+Cell.Num = 100000 # Usually inoculate 1,000,000 cells, but similar results obtained by simulating 100,000 cells
+Burst.Size = 986
+Rep.Num=nrow(Pp)
+
+### Initialize Summary Data Frame ----
+
+Cell.Summary.Names=c(
+  # Model Parameters
+  "Rep","MOI",
+  
+  # Outcomes
+  "Productive", "Productive.Co.Infected","Expressing.HA",
+  "Virion.Number","Parent.A.Percent","Parent.B.Percent","Reassortant.Percent","Reassortant.HN.Percent",
+  "Parent.A.Number","Parent.B.Number","Reassortant.Number","Reassortant.HN.Number"
+)
+
+Cell.Summary=matrix(nrow=(MOI.Num*Rep.Num),
+                    ncol=length(Cell.Summary.Names),
+                    data=0)
+
+colnames(Cell.Summary)=Cell.Summary.Names
+Cell.Summary=as.data.frame(Cell.Summary)
+Cell.Summary$Rep=rownames(Pp)
+
+Complete.Summary = Cell.Summary[1:MOI.Num,]
+
+Summary.Index = 1
+
+Pp = as.matrix(Pp)
+
+
+# Simulation ----
+Sim.Start = Sys.time()
+
+for (moi in 1:MOI.Num) {
+  for (cell in 1:Rep.Num) {
+    
+    Infected.Cells = CellInfection(MOI = MOI[cell,moi],
+                                   Cell.Num = Cell.Num,
+                                   Pp = Pp[cell,])
+    
+    Cell.Summary[Summary.Index,"Productive"] =  mean(Infected.Cells[,"Productive"]) * 100
+    Cell.Summary[Summary.Index,"Productive.Co.Infected"] = mean(Infected.Cells[,"Productive.Co.Infected"]) * 100
+    Cell.Summary[Summary.Index,"Expressing.HA"] = mean(Infected.Cells[,"Surface.HA"]) * 100
+    Cell.Summary[Summary.Index,"Rep"] = rownames(Pp)[cell]
+    Cell.Summary[Summary.Index,"MOI"] = MOI[cell,moi]
+    Cell.Summary[Summary.Index,"Virion.Number"] = Burst.Size * Cell.Summary[Summary.Index,"Productive"]
+    
+    Infected.Cells=Infected.Cells[Infected.Cells[,"Productive"]==1,,drop=FALSE] 
+    Cell.Summary[Summary.Index,"Parent.A.Percent"] = mean(Infected.Cells[,"pParent.A"]) * 100
+    Cell.Summary[Summary.Index,"Parent.B.Percent"] = mean(Infected.Cells[,"pParent.B"]) * 100
+    Cell.Summary[Summary.Index,"Reassortant.Percent"] = mean(Infected.Cells[,"pReassort"]) * 100
+    Cell.Summary[Summary.Index,"Reassortant.HN.Percent"] = mean(Infected.Cells[,"pHN.Reassort"]) * 100
+    
+    Cell.Summary[Summary.Index,"Parent.A.Number"] = Cell.Summary[Summary.Index,"Parent.A.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+    Cell.Summary[Summary.Index,"Parent.B.Number"] = Cell.Summary[Summary.Index,"Parent.B.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+    Cell.Summary[Summary.Index,"Reassortant.Number"] = Cell.Summary[Summary.Index,"Reassortant.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+    Cell.Summary[Summary.Index,"Reassortant.HN.Number"] = Cell.Summary[Summary.Index,"Reassortant.HN.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+    
+    Summary.Index=Summary.Index+1
+  }
+  
+  Infected.Cells = CellInfection(MOI = MOI[1,moi],
+                                 Cell.Num = Cell.Num,
+                                 Pp = rep(1,8))
+  
+  Complete.Summary[moi,"Productive"] =  mean(Infected.Cells[,"Productive"]) * 100
+  Complete.Summary[moi,"Productive.Co.Infected"] = mean(Infected.Cells[,"Productive.Co.Infected"]) * 100
+  Complete.Summary[moi,"Expressing.HA"] = mean(Infected.Cells[,"Surface.HA"]) * 100
+  Complete.Summary[moi,"Rep"] = 1
+  Complete.Summary[moi,"MOI"] = MOI[cell,moi]
+  Complete.Summary[moi,"Virion.Number"] = Burst.Size * Cell.Summary[Summary.Index,"Productive"]
+  
+  Infected.Cells=Infected.Cells[Infected.Cells[,"Productive"]==1,,drop=FALSE] 
+  Complete.Summary[moi,"Parent.A.Percent"] = mean(Infected.Cells[,"pParent.A"]) * 100
+  Complete.Summary[moi,"Parent.B.Percent"] = mean(Infected.Cells[,"pParent.B"]) * 100
+  Complete.Summary[moi,"Reassortant.Percent"] = mean(Infected.Cells[,"pReassort"]) * 100
+  Complete.Summary[moi,"Reassortant.HN.Percent"] = mean(Infected.Cells[,"pHN.Reassort"]) * 100
+  
+  Complete.Summary[moi,"Parent.A.Number"] = Cell.Summary[Summary.Index,"Parent.A.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+  Complete.Summary[moi,"Parent.B.Number"] = Cell.Summary[Summary.Index,"Parent.B.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+  Complete.Summary[moi,"Reassortant.Number"] = Cell.Summary[Summary.Index,"Reassortant.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+  Complete.Summary[moi,"Reassortant.HN.Number"] = Cell.Summary[Summary.Index,"Reassortant.HN.Percent"] * Cell.Summary[Summary.Index,"Virion.Number"]
+}
+
+Sim.End = Sys.time()
+Sim.Time = Sim.End - Sim.Start
+
+
+# Analysis ----
+X="Expressing.HA"
+Y="Reassortant.Percent"
+
+FM.Data=read.csv(file = file.path(Data.Path,"Fonville_Marshall_Reassortment_Data.csv"),header=TRUE,sep=",")
+
+Cell.Summary$Rep = as.numeric(Cell.Summary$Rep)
+
+ggplot() +
+  geom_line(data=Cell.Summary,aes(y=Reassortant.Percent,x=Expressing.HA,group=as.factor(Rep),color=as.factor(Rep)),lwd=1) +
+  geom_line(data = Complete.Summary, aes(x = Expressing.HA, y = Reassortant.Percent), lty = 2, lwd = 1) +
+  geom_point(data=FM.Data,aes_string(x=X,y=Y),size=2,col="black") +
+  annotate("text",x = 75, y = 15,size = 6,label = TeX("\\textbf{$\\P_P$ = 1}")) +
+  labs(x=expression(bold("% Cells HA"^"+")),
+       y="% Reassortment",
+       color="Rep") +
+  guides(color = FALSE) +
+  scale_x_continuous(limits=c(0,100)) +
+  scale_y_continuous(limits=c(0,100)) +
+  theme(text=element_text(size=12,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave(file.path(Data.Path,"Figures/1B_Predicted_Reassortment.pdf"),
+       dpi = 300,
+       width = 4,
+       height = 4,
+       unit = "in")
+
+```
+
+
+```{r Figure 2, eval = TRUE}
+
+Pp = seq(from = 0.01, to = 1, by = 0.01)
+tau = matrix(nrow = 1,
+             ncol = 9,
+             data = c(1,0,0,0,0,0,0,0,0))
+sub.tau = matrix(nrow = 1,
+                 ncol = 8,
+                 data = c(1,0,0,0,0,0,0,0))
+
+trans = matrix(nrow = 9,
+               ncol = 9,
+               data = 0)
+ident = diag(8)
+one.mat = matrix(nrow = 8,
+                 ncol = 1,
+                 data = 1)
+
+Segment.Probs = matrix(ncol = 5,
+                       nrow = 100 * 100 * 9,
+                       data = 0)
+
+Inf.Unit = rep(0, 100)
+Inf.Unit.sd = rep(0,100)
+
+colnames(Segment.Probs) = c("Pp","Virion","Segments","Prob","Expected.Segments")
+# Order = Pp -> Virion # -> Segments
+Segment.Probs[,"Pp"] = rep(seq(from = 0.01, to = 1, by = 0.01), each = 900)
+Segment.Probs[,"Virion"] = rep(1:100, each = 9)
+Segment.Probs[,"Segments"] = rep(seq(0,8),100)
+Segment.Mat = matrix(nrow = 9,
+                     ncol = 1,
+                     data = 0:8)
+index = 1
+
+for (pp in 1:100) {
+  
+  # Define Transition Matrix
+  for (i in 0:8) {
+    for (j in i:8) {
+      trans[i+1,j+1] = dbinom(x = j - i, size = 8 - i, prob = Pp[pp])
+    }
+    trans[9,9] = 1
+  }
+  
+  for (v in 1:100) {
+    
+    Prob.Vector = t(tau %*% (trans %^% v))
+    
+    Segment.Probs[index:(index + 8),"Prob"] = Prob.Vector
+    Segment.Probs[index:(index + 8),"Expected.Segments"] = t(Prob.Vector) %*% Segment.Mat
+    index = index + 9
+  }
+  
+  # Calculate Infectious Unit
+  sub.trans = trans[1:8,1:8]
+  Q = sub.trans
+  N = solve(ident - Q)
+  t = N %*% one.mat
+  tsq = t^2
+  Inf.Unit[pp] = sub.tau %*% solve(ident - sub.trans) %*% one.mat
+  Inf.Unit.sd[pp] = sqrt(((2 * N - ident) %*% t - tsq)[1,1])
+  
+}
+
+Segment.Probs = as.data.frame(Segment.Probs)
+
+# Productive Matrix ----
+
+Productive = Segment.Probs %>% filter(Segments == 8)
+Productive = Productive[,c(1,2,4,5)]
+Productive$Convert = Productive$Prob
+index = 1
+for (pp in 1:100) {
+  Productive[(index + 1):(index + 99),"Convert"] = 
+    Productive[(index + 1):(index + 99),"Prob"] - Productive[(index):(index + 98),"Prob"]
+  index = index + 100
+  
+}
+
+Geom = matrix(ncol = 3,
+              nrow = 100,
+              data = c(Pp,Inf.Unit,Inf.Unit.sd),
+              byrow = FALSE) %>%
+  as.data.frame
+colnames(Geom) = c("Pp","Inf.Unit","Inf.Unit.sd")
+
+Exp.Pp = read.csv(file = file.path(Data.Path,"Pp_Summary.csv"),na.strings = c("","-")) %>% 
+  filter(Delay == 0) %>%
+  dplyr::select(Rep,Avg) %>%
+  mutate(Pp = as.numeric(round(Avg * 100)))
+
+Exp.Pp$Rep = (Exp.Pp$Rep)
+
+Inf.Unit.Sum = Geom[Exp.Pp[1:13,"Pp"],]
+Inf.Unit.Sum$Rep = 1:nrow(Inf.Unit.Sum)
+Inf.Dose = mean(Inf.Unit.Sum$Inf.Unit) %>% round(1)
+
+Geom$Particle_PFU = (Geom$Pp ^ 8)
+Inf.Unit.Sum$Full = (Inf.Unit.Sum$Pp ^ 8) * 100
+Geom$Full.sd = sqrt(Geom$Particle_PFU * (1 - Geom$Particle_PFU))
+Inf.Unit.Sum$Full %>% mean
+Inf.Unit.Sum$Inf.Unit %>% mean
+
+Fig.2 = ggplot() +
+    theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5, color = "black"),
+        axis.line.y = element_line(size=0.5, color = "black"),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+# Figure 2A: # Segments from 1 Virion ----
+
+Fig.2 +
+  geom_line(data = Segment.Probs %>% filter(Virion == 1,
+                                            floor(Pp*100) %in% c(10,58,90)),
+            aes(x = Segments,
+                y = Prob,
+                color = Pp,
+                group = Pp),
+            lwd = 1) +
+  labs(x = "# Segments",
+       y = "Frequency") +
+  scale_color_viridis(begin = 0.1, end = 0.9)
+
+ggsave("Figures/2A_Segments_from_1_Virion.pdf",
+       dpi = 300,
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Figure 2B: % Fully Infectious Virions ----
+Fig.2 +
+  geom_line(data = Geom,
+            aes(x = Pp,
+                y = Particle_PFU * 100),
+            lwd = 1) +
+  geom_ribbon(data = Geom,
+              aes(x = Pp,
+                  ymin = pmax(0,(Particle_PFU - Full.sd * 1.96) * 100),
+                  ymax = pmin(100,(Particle_PFU + Full.sd * 1.96) * 100)),
+              alpha = 0.3) +
+  geom_point(data = Inf.Unit.Sum,
+             aes(x = Pp,
+                 y = Full,
+                 color = factor(Rep)),
+             size = 2) +
+  geom_segment(aes(y = Inf.Unit.Sum$Full %>% mean,
+                   yend = Inf.Unit.Sum$Full %>% mean,
+                   # y = 1.22,
+                   # yend = 1.22,
+             x = 0,
+             xend = 0.58),
+             linetype = 2) +
+  xlab(bquote(bold(P[P]))) +
+  scale_color_tableau(palette = "Tableau 20") +
+  scale_y_continuous(breaks = c(1.2,25,50,75,100)) +
+#  annotate("text",x = 0.3, y = 80,size = 5,label = TeX("\\textbf{1.22% (0 - 30.5) virions fully infectious}")) +
+  ylab("% Fully Infectious Virions")
+
+ggsave("Figures/2B_Percent_Fully_Infectious_Particles.pdf",
+       dpi = 300,
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Figure 2C: p(Productive) vs. Virion Number ----
+Fig.2 +
+  geom_line(data = Segment.Probs %>% filter(Segments == 8,
+                                            floor(Pp*100) %in% c(10,58,90)),
+            aes(x = Virion,
+                y = Prob * 100,
+                group = Pp,
+                color = Pp),
+            lwd = 1) +
+  labs(x="Virions Infecting",
+       y="Expected % Productive") +
+  scale_color_viridis(begin = 0.1, end = 0.9) +
+  scale_x_continuous(trans = "log10")
+
+ggsave("Figures/2C_Percent_Cells_Productive_v_Virion_Number.pdf",
+       dpi = 300,
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Figure 2D: Infectious Unit vs. Pp ----
+Fig.2 + 
+  geom_line(data = Geom,
+            aes(x = Pp,
+                y = Inf.Unit),
+            lwd = 1) +
+    labs(x=bquote(bold(P[P])),
+       y="Infectious Unit (# Virions)") +
+  
+  scale_y_continuous(limits = c(0,55), breaks = c(0,10,20,30,40,50))
+
+ggsave("Misc_Plots/Infectious_Unit_No_Data.pdf",
+       dpi = 300,
+       width = 4,
+       height = 4,
+       unit = "in")
+
+Fig.2 +
+    geom_line(data = Geom,
+            aes(x = Pp,
+                y = Inf.Unit),
+            lwd = 1) +
+    labs(x=bquote(bold(P[P])),
+         y="Infectious Unit (# Virions)") +
+  scale_y_continuous(breaks = c(0,3.6,10,20,30,40,50),
+                     limits = c(0,55)) +
+  geom_ribbon(data = Geom %>% filter(Pp > 0.03),
+              aes(x = Pp,
+                  ymax = pmin(Inf.Unit + Inf.Unit.sd * 1.96,55),
+                  ymin = pmax(Inf.Unit - Inf.Unit.sd * 1.96,1)),
+              alpha = 0.3) +
+  geom_point(data = Inf.Unit.Sum,
+             aes(x = Pp,
+                 y = Inf.Unit,
+                 color = factor(Rep)),
+             size = 2) +
+  guides(color = FALSE) +
+  xlab(bquote(bold(P[P]))) +
+  scale_color_tableau(palette = "Tableau 20") +
+  geom_segment(aes(x = 0, xend = 0.52,
+                   y = 3.6, yend = 3.6),
+               lty = 2) +
+#  annotate("text",x = 0.6, y = 40,size = 5,label = TeX("\\textbf{Infectious Unit = 3.6 (1 - 6.5) virions}")) +
+
+ggsave("Figures/2D_Infectious_Unit_with_Data.pdf",
+       dpi = 300,
+       width = 5,
+       height = 5,
+       unit = "in")
+
+tau = matrix(nrow = 1,
+             ncol = 9,
+             data = c(1,0,0,0,0,0,0,0,0))
+sub.tau = matrix(nrow = 1,
+                 ncol = 8,
+                 data = c(1,0,0,0,0,0,0,0))
+
+trans = matrix(nrow = 9,
+               ncol = 9,
+               data = 0)
+ident = diag(8)
+one.mat = matrix(nrow = 8,
+                 ncol = 1,
+                 data = 1)
+
+  # Define Transition Matrix for Pp = 0.58
+  for (i in 0:8) {
+    for (j in i:8) {
+      trans[i+1,j+1] = dbinom(x = j - i, size = 8 - i, prob = 0.58)
+    }
+    trans[9,9] = 1
+  }
+  
+  # Calculate Infectious Unit
+  sub.trans = trans[1:8,1:8]
+  Q = sub.trans
+  N = solve(ident - Q)
+  t = N %*% one.mat
+  tsq = t^2
+  Inf.Unit = sub.tau %*% solve(ident - sub.trans) %*% one.mat
+  Inf.Unit.sd = sqrt(((2 * N - ident) %*% t - tsq)[1,1])
+  Inf.Unit # 3.6
+  Inf.Unit + 1.96 * Inf.Unit.sd # 6.5
+  Inf.Unit - 1.96 * Inf.Unit.sd # 0.79
+
+
+```
+
+```{r Figure 3, eval = TRUE}
+
+# Import Data ----
+Sim3=read.csv(file.path(Data.Path,"NTJ_Sim3_Summary_Data.csv"),sep=",",header=TRUE)
+
+Sim3=subset(Sim3,MOI>0)
+Sim3$Infected=as.numeric(Sim3$Infected)
+
+# Output: 
+#     % Productive vs. MOI -- how many is enough/what is the point of diminishing returns?
+#     Segments/Cell vs. MOI -- slower accumulation of segments at lower Pp
+#     % Populations infected vs. MOI -- What is the infectious dose (MOI) at the population level?
+
+# Misc Plots ----
+
+Sum.Sim3 = Sim3 %>%
+  mutate(MOI = (MOI)) %>%
+  group_by(MOI,Pp) %>%
+  summarise(Segments = mean(Segments),
+            Productive = mean(Productive),
+            Infected = mean(Infected) * 100,
+            Semi = mean(Semi),
+            Infected_Cells = mean(Infected_Cells),
+            Semi_Prop = mean(Semi) / mean(Infected_Cells))
+Fig.3 = ggplot() +
+    theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5, color = "black"),
+        axis.line.y = element_line(size=0.5, color = "black"),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+Fig.3 +
+  geom_line(data = Sum.Sim3 %>% filter(Pp != 0.58),aes(x = log10(MOI),
+                           y = Segments,
+                           color = Pp,
+                           group = Pp), lwd = 1) +
+  scale_color_viridis(guide = FALSE) +
+  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
+       y = TeX("\\textbf{Segments / Cell}"),
+       color = NULL) +
+
+ggsave('Misc_Plots/Population_Segments_Per_Cell.pdf',
+       width = 4,
+       height = 4,
+       unit = "in")
+
+# % Cells Productive vs. MOI
+
+Fig.3 +
+  geom_line(data=Sum.Sim3 %>% filter(Pp != 0.58),aes(x = log10(MOI),
+                              y = Productive,
+                              color = Pp,
+                              group = Pp), lwd = 1) +
+  scale_color_viridis(guide = FALSE) +
+  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
+       y = TeX("\\textbf{% Cells Productive}"),
+       color = NULL)
+
+ggsave('Misc_Plots/Population_Percent_Cells_Productive.pdf',
+       width = 4,
+       height = 4,
+       unit = "in")
+
+# Figure 3A: Populations Infected vs. MOI ----
+
+Fig.3 +
+  geom_line(data=Sum.Sim3 %>% filter(Pp != 0.58),
+            aes(x = log10(MOI),
+                y = Infected,
+                color = Pp,
+                group = Pp),
+            lwd = 1) +
+  scale_color_viridis(guide = FALSE) +
+  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
+       y = TeX("\\textbf{% Populations Infected}"),
+       color = NULL)
+
+ggsave('Figures/3A_Populations_Infected.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Figure 3B: Population ID50 vs. Pp ----
+
+Pop.ID50 = matrix(nrow = 10,
+                  ncol = 4,
+                  data = 0)
+
+colnames(Pop.ID50) = c("Pp","ID50","Low95","High95")
+Pop.ID50[,"Pp"] = 1:10 / 10
+
+for (p in 1:9) {
+  model = drm(data = Sum.Sim3 %>% filter(Pp == (p / 10), Infected < 100),
+      formula = Infected ~ MOI,
+      fct = LL.5()) %>%
+    ED(50)
+  Pop.ID50[p,"ID50"] = model[,1]
+  Pop.ID50[p,"Low95"] = model[,1] - 1.96 * model[,2]
+  Pop.ID50[p,"High95"] = model[,1] + 1.96 * model[,2]
+}
+Pop.ID50[10,"ID50"] = 1e-5
+
+Pop.ID50 = data.frame(Pop.ID50)
+Pop.ID50$ID50 = log10(Pop.ID50$ID50)
+Pop.ID50$Low95 = log10(Pop.ID50$Low95)
+Pop.ID50$High95 = log10(Pop.ID50$High95)
+
+Pop.ID50$Num_Full = 1 / (Pop.ID50$Pp ^ 8)
+Pop.ID50$MOI_Full = (Pop.ID50$Num_Full / 1e5) %>% log10
+
+Fig.3 +
+  geom_line(data = Pop.ID50[1:9,],
+            aes(x = Pp,
+                y = ID50),
+            lwd = 1) +
+  geom_line(data = Pop.ID50[1:9,],
+            aes(x = Pp,
+                y = MOI_Full),
+            lty = 2,
+            lwd = 1) +
+  geom_ribbon(data = Pop.ID50[1:9,],
+              aes(x = Pp,
+                  ymin = Low95,
+                  ymax = High95),
+              alpha = 0.3) +
+  scale_x_continuous(limits = c(0,1), breaks = c(0,0.25,0.5,0.75,1)) +
+  scale_y_continuous(limits = c(-5,3), breaks = c(-4,-2,0,2)) +
+  labs(x = TeX("\\textbf{P_P}"),
+       y = TeX("\\textbf{Population ID_5_0 (log_1_0 Virions / Cell)}")) +
+  theme(text = element_text(size=14,face="bold"))
+
+ggsave('Figures/3B_Population_ID50.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+Fig.3 +
+  geom_line(data=Sum.Sim3,aes(x = log10(MOI),
+                              y = Semi,
+                              color = Pp,
+                              group = Pp), lwd = 1.2) +
+  scale_color_viridis(guide = FALSE) +
+  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
+       y = TeX("\\textbf{% Cells Semi-Infected}"),
+       color = NULL)
+
+ggsave('Misc_Plots/Population_Percent_Cells_with_IVGs.pdf',
+       width = 4,
+       height = 4,
+       unit = "in")
+
+```
+
+```{r Figure 4 Data Processing, eval = TRUE}
+NTJ21 = read.csv(file = file.path(Data.Path,"NTJ_Sim21_Data.csv"))
+
+NTJ21.Peak = NTJ21 %>%
+  group_by(Sim,Spread_Frac,Pp,Virus_D) %>%
+  summarise(Max_Productive = max(Productive),
+            Max_Virions = max(Virions),
+            Max_Semi = max(Infected - Productive))
+
+NTJ21.Hours = NTJ21 %>%
+  filter((t * 10) %in% (1:(96 * 10)))
+
+write.csv(NTJ21.Peak,file=file.path(Data.Path,"NTJ21_Peak_Data.csv"),row.names=FALSE)
+write.csv(NTJ21.Hours,file=file.path(Data.Path,"NTJ21_Hours_Data.csv"),row.names=FALSE)
+```
+
+```{r Figure 4, eval = TRUE}
+
+# Import Data ----
+NTJ21.Peak = read.csv(file = file.path(Data.Path,"NTJ21_Peak_Data.csv")) %>%
+  mutate(Virus_D = log10(Virus_D / 3600)) %>%
+  filter(Virus_D < 5,
+         Spread_Frac %in% c(0))
+
+NTJ21.Hours = read.csv(file=file.path(Data.Path,"NTJ21_Hours_Data.csv")) %>%
+  mutate(Virus_D = log10(Virus_D / 3600)) %>%
+  filter(Virus_D < 5,
+         Spread_Frac %in% c(0))
+NTJ21.Hours = NTJ21.Hours %>%
+  mutate(Spread_Frac = as.numeric(Spread_Frac))
+
+NTJ21.Hours = NTJ21.Hours %>%
+  mutate(Spread_Frac = factor(Spread_Frac,levels = c("0.25","0")),
+         Spread_Frac = recode(Spread_Frac,"0.25" = "25% Local Spread","0" = "Diffusion Only"))
+NTJ21.Peak = NTJ21.Peak %>%
+  mutate(Spread_Frac = factor(Spread_Frac,levels = c("0.25","0")),
+         Spread_Frac = recode(Spread_Frac,"0.25" = "25% Local Spread","0" = "Diffusion Only"))
+
+# Plot Stock ----
+Fig.4 = ggplot() +
+  scale_color_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1"), guide = FALSE) +
+  scale_fill_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1"), guide = FALSE) +
+  scale_y_continuous(limits = c(0,105)) +
+  geom_vline(xintercept = log10((5.825)), lty = 2) +
+  coord_cartesian(xlim = c(-0.5,4)) +
+  theme(text=element_text(size = 15,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle = 0,vjust=0.75,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+# Figure 4A: Initial Growth Rate ----
+Early.Time = 12
+df = NTJ21.Hours %>%
+  filter(t == Early.Time) %>%
+  mutate(Slope = pmax(log10(Productive),0)) %>%
+  select(Pp,Virus_D,Spread_Frac,Sim,Slope) %>%
+  group_by(Pp,Virus_D,Spread_Frac) %>%
+  summarise(r0 = mean(Slope)) %>%
+  ungroup %>%
+  mutate(Pp = Pp + 0.005) %>%
+  mutate(Pp = round(Pp,2))
+
+Fig.4 +
+  geom_point(data = df,
+             aes(x = Virus_D,
+                 y = r0,
+                 color = Spread_Frac)) +
+  geom_smooth(data = df,
+              aes(x = Virus_D,
+                  y = r0,
+                  linetype = factor(Pp),
+                  color = Spread_Frac,
+                  fill = Spread_Frac,
+                  group = interaction(Spread_Frac,Pp)),
+              lwd = 1.2,
+              alpha = 0.3) +
+  labs(y = TeX("\\textbf{$\\log_1_0$ Cells Infected in 12 Hours}"),
+       x = TeX("\\textbf{Diffusion Coefficient ($\\log_1_0$ $\\mu$m^2/s)}"),
+       linetype = TeX("\\textbf{$\\P_P$}"),
+       size = TeX("\\textbf{$\\P_P$}"),
+       color = NULL,
+       fill = NULL) +
+  scale_linetype_manual(values = c("1" = 1,"0.58" = 1212)) +
+  scale_y_continuous(limits = c(0,4)) +
+  scale_color_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1")) +
+  scale_fill_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1"))
+  
+ggsave('Figures/4A_r0_Raw.pdf',
+       width = 6,
+       height = 6,
+       unit = "in")
+
+# Figure 4B: Reduction in Initial Growth Rate ----
+
+Early.Time = 12
+
+df1 = NTJ21.Hours %>%
+  filter(t == Early.Time,
+         Pp == 1) %>%
+  mutate(Slope = log10(Productive) / t) %>%
+  group_by(Virus_D,Spread_Frac) %>%
+  summarise(Intact_r0 = mean(Slope))
+
+df2 = NTJ21.Hours %>%  
+  filter(t == Early.Time,
+         Pp < 1) %>%
+  mutate(Slope = pmax(log10(Productive) / t,0)) %>%
+  select(Pp,Virus_D,Spread_Frac,Sim,Slope)
+
+df3 = right_join(df1,df2) %>%
+  mutate(Cost = (1 - (Slope / Intact_r0)) * 100) %>%
+  group_by(Virus_D,Spread_Frac) %>%
+  summarise(Cost = mean(Cost))
+
+Fig.4 +
+    geom_point(data = df3,
+             aes(x = Virus_D,
+                 y = Cost,
+                 color = Spread_Frac,
+                 group = Spread_Frac)) +
+  geom_smooth(data = df3,
+              aes(x = Virus_D,
+                  y = Cost,
+                  group = Spread_Frac,
+                  color = Spread_Frac,
+                  fill = Spread_Frac),
+              lty = 1212,
+              alpha = 0.3) +
+  labs(y = "% Reduction in Initial Growth Rate",
+       x = TeX("\\textbf{Diffusion Coefficient ($\\log_1_0$ $\\mu$m^2/s)}"))
+
+ggsave('Figures/4B_r0_Reduction.pdf',
+       width = 6,
+       height = 6,
+       unit = "in")
+
+# Figure 4C: Increase in Time to Infect 100 Cells ----
+Target_Cells = 100
+
+df1 = NTJ21.Hours %>%
+  filter(Pp == 1,
+         Productive >= Target_Cells) %>%
+  group_by(Spread_Frac,Virus_D,Sim) %>%
+  summarise(To_Target_Cells = min(t)) %>%
+  ungroup() %>%
+  group_by(Spread_Frac,Virus_D) %>%
+  summarise(Intact_To_Target_Cells = mean(To_Target_Cells))
+
+df2 = NTJ21.Hours %>%
+  filter(Pp < 1,
+         Productive >= Target_Cells) %>%
+  group_by(Spread_Frac,Virus_D,Sim) %>%
+  summarise(To_Target_Cells = min(t)) %>%
+  select(Spread_Frac,Virus_D,Sim,To_Target_Cells)
+
+df3 = right_join(df1,df2) %>%
+  mutate(Target_Cell_Cost = (To_Target_Cells - Intact_To_Target_Cells) / Intact_To_Target_Cells * 100) %>%
+  group_by(Virus_D,Spread_Frac) %>%
+  summarise(Target_Cell_Cost = mean(Target_Cell_Cost))
+
+Fig.4 +
+  geom_point(data = df3,
+             aes(x = Virus_D,
+                 y = Target_Cell_Cost,
+                 color = Spread_Frac,
+                 group = Spread_Frac)) + 
+  geom_smooth(data = df3,
+              aes(x = Virus_D,
+                  y = Target_Cell_Cost,
+                  group = Spread_Frac,
+                  color = Spread_Frac,
+                  fill = Spread_Frac),
+              lty = 1212,
+              alpha = 0.3) +
+  scale_y_continuous(limits = c(0,600)) +
+  labs(y = "% Increase in Time to Infect 100 Cells",
+       x = TeX("\\textbf{Diffusion Coefficient ($\\log_1_0$ $\\mu$m^2/s)}"))
+
+ggsave('Figures/4C_Increase_in_Time_to_100_Cells.pdf',
+       width = 6,
+       height = 6,
+       unit = "in")
+
+# Figure 4D: Increase in Time to Produce 10^5 Virions ----
+
+Target_Virions = 1e5
+df1 = NTJ21.Hours %>%
+  filter(Pp == 1,
+         Virions >= Target_Virions) %>%
+  group_by(Spread_Frac,Virus_D,Sim) %>%
+  summarise(To_Target_Virions = min(t)) %>%
+  ungroup() %>%
+  group_by(Spread_Frac,Virus_D) %>%
+  summarise(Intact_To_Target_Virions = mean(To_Target_Virions))
+
+
+df2 = NTJ21.Hours %>%
+  filter(Pp < 1,
+         Virions >= Target_Virions) %>%
+  group_by(Spread_Frac,Virus_D,Sim) %>%
+  summarise(To_Target_Virions = min(t)) %>%
+  select(Spread_Frac,Virus_D,Sim,To_Target_Virions)
+
+df3 = right_join(df1,df2) %>%
+  mutate(Target_Virion_Cost = (To_Target_Virions - Intact_To_Target_Virions) / Intact_To_Target_Virions * 100) %>%
+  group_by(Virus_D,Spread_Frac) %>%
+  summarise(Target_Virion_Cost = mean(Target_Virion_Cost))
+
+Fig.4 +
+  geom_point(data = df3,
+             aes(x = Virus_D,
+                 y = Target_Virion_Cost,
+                 color = Spread_Frac,
+                 group = Spread_Frac)) + 
+  geom_smooth(data = df3,
+              aes(x = Virus_D,
+                  y = Target_Virion_Cost,
+                  group = Spread_Frac,
+                  color = Spread_Frac,
+                  fill = Spread_Frac),
+              lty = 1212,
+              alpha = 0.3) +
+  scale_y_continuous(limits = c(0,400)) +
+  labs(y = TeX("\\textbf{% Increase in Time to Yield 10^5 Virions}"),
+       x = TeX("\\textbf{Diffusion Coefficient ($\\log_1_0$ $\\mu$m^2/s)}"))
+
+ggsave('Figures/4D_Increase_in_Time_to_1e5_Virions.pdf',
+       width = 6,
+       height = 6,
+       unit = "in")
+
+
+# Supplemental Figure 2: Representative Time Course of Productive Cells vs. Time ----
+ggplot() +
+  geom_line(data = NTJ21.Hours %>% filter(Pp == 1,Sim == 1,Spread_Frac == "Diffusion Only"),
+            aes(x = t,
+                y = Productive,
+                color = Virus_D,
+                group = Virus_D),
+            lwd = 1.2) +
+  scale_color_viridis(guide = FALSE) +
+  scale_y_continuous(limits = c(0,10000),labels = comma) +
+  scale_x_continuous(breaks = c(0,24,48,72)) +
+  labs(x = TeX("\\textbf{Time Post-Inoculation (Hours)}"),
+       y = TeX("\\textbf{Productively Infected Cells}")) +
+  theme(text=element_text(size = 13,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle = 0,vjust=0.75,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave('Figures/Supp2A_Time_Course_Pp1.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+ggplot() +
+  geom_line(data = NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only"),
+            aes(x = t,
+                y = Productive,
+                color = Virus_D,
+                group = Virus_D),
+            lwd = 1.2) +
+  scale_color_viridis(guide = FALSE) +
+  scale_y_continuous(limits = c(0,10000),labels = comma) +
+  scale_x_continuous(breaks = c(0,24,48,72)) +
+  labs(x = TeX("\\textbf{Time Post-Inoculation (Hours)}"),
+       y = TeX("\\textbf{Productively Infected Cells}")) +
+  theme(text=element_text(size = 13,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle = 0,vjust=0.75,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave('Figures/Supp2C_Time_Course_Pp_058_.pdf',
+       width = 6,
+       height = 5,
+       unit = "in")
+
+# Supplemental Figure 2: Representative Time Courses of Virions vs. Time ----
+ggplot() +
+  geom_line(data = NTJ21.Hours %>% filter(Pp == 1,Sim == 1,Spread_Frac == "Diffusion Only"),
+            aes(x = t,
+                y = Virions %>% log10,
+                color = Virus_D,
+                group = Virus_D),
+            lwd = 1.2) +
+  scale_color_viridis(guide = FALSE) +
+  scale_x_continuous(breaks = c(0,24,48,72)) +
+  labs(x = TeX("\\textbf{Time Post-Inoculation (Hours)}"),
+       y = TeX("\\textbf{$\\log_1_0$ Virions}")) +
+  theme(text=element_text(size = 13,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle = 0,vjust=0.75,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave('Figures/Supp2B_Virion_Time_Course_PP1.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+ggplot() +
+  geom_line(data = NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only"),
+            aes(x = t,
+                y = Virions %>% log10,
+                color = Virus_D,
+                group = Virus_D),
+            lwd = 1.2) +
+  scale_color_viridis(guide = FALSE) +
+  scale_x_continuous(breaks = c(0,24,48,72)) +
+  labs(x = TeX("\\textbf{Time Post-Inoculation (Hours)}"),
+       y = TeX("\\textbf{$\\log_1_0$ Virions}")) +
+  theme(text=element_text(size = 13,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle = 0,vjust=0.75,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave('Figures/Supp2D_Virion_Time_Course_Pp_058.pdf',
+       width = 6,
+       height = 5,
+       unit = "in")
+
+D_Legend = ggplot() +
+  geom_line(data = NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only"),
+            aes(x = t,
+                y = Virions %>% log10,
+                color = Virus_D,
+                group = Virus_D),
+            lwd = 1.2) +
+  scale_color_viridis() +
+  scale_x_continuous(breaks = c(0,24,48,72)) +
+  labs(color = TeX("\\textbf{Diffusion Coefficient ($\\log_1_0$ $\\mu$m^2/s)}")) +
+  theme(text=element_text(size = 13,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle = 0,vjust=0.75,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+# Supplemental Figure 2 Legend: Diffusion Coefficient Color Gradient  ----
+plot(g_legend(D_Legend))
+ggsave('Figures/Supp2_D_Legend.pdf',
+       width = 4,
+       height = 4,
+       unit = "in")
+
+Supp.Fig.2.Legend = arrangeGrob(g_legend(D_Legend))
+
+ggsave(Supp.Fig.2.Legend,
+       file = "Figures/Supp2Legend.pdf",
+       dpi = 300,
+       width = 4,
+       height = 3,
+       unit = "in")
+
+Legend.Fig.4 = ggplot() +
+  geom_point(data = df,
+             aes(x = Virus_D,
+                 y = r0,
+                 color = Spread_Frac)) +
+  geom_smooth(data = df,
+              aes(x = Virus_D,
+                  y = r0,
+                  linetype = factor(Pp),
+                  color = Spread_Frac,
+                  fill = Spread_Frac,
+                  group = interaction(Spread_Frac,Pp)),
+              lwd = 1.2,
+              alpha = 0.3) +
+  labs(y = TeX("\\textbf{$\\log_1_0$ Cells Infected in 12 Hours}"),
+       x = TeX("\\textbf{Diffusion Coefficient ($\\log_1_0$ $\\mu$m^2/s)}"),
+       linetype = TeX("\\textbf{$\\P_P$}"),
+       size = TeX("\\textbf{$\\P_P$}"),
+       color = NULL,
+       fill = NULL) +
+  scale_linetype_manual(values = c("1" = 1,"0.58" = 1212)) +
+  scale_y_continuous(limits = c(0,4)) +
+  scale_color_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1")) +
+  scale_fill_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1")) +
+  theme(text=element_text(size = 15,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle = 0,vjust=0.75,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5),
+        axis.ticks.y = element_line(size = 0.5),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+Fig.4.Legend = arrangeGrob(g_legend(Legend.Fig.4))
+
+ggsave(Fig.4.Legend,
+       file = "Figures/4Legend.pdf",
+       dpi = 300,
+       width = 4,
+       height = 3,
+       unit = "in")
+
+```
+
+```{r Figure 5, eval = TRUE}
+
+# Import Data ----
+Cell.Num = 6.4e5
+
+NTJ29 = read.csv(file = file.path(Data.Path,"NTJ29_Data.csv"), header = TRUE) %>%
+  melt(id = c("MOI","Time")) %>%
+  na.omit() %>% 
+  mutate(PFU = (value))
+
+# Analyze Data ----
+# Growth Curve Summary
+NTJ29.Sum =  NTJ29 %>% mutate(PFU = log10(PFU),
+         MOI = (MOI)) %>%
+  group_by(MOI, Time) %>%
+  summarise(Titer = mean(PFU),
+            se = sd(PFU)/sqrt(length(PFU)))
+
+# Virus Production by Time Window
+NTJ29.Kinetics = NTJ29 %>% group_by(MOI) %>%
+  mutate(growth = 2 * (PFU - lag(PFU))) %>%
+  mutate(growth = pmax(growth,1)) %>%
+  filter(Time %in% c(12,16,24)) %>%
+  mutate(growth = log10(growth)) %>%
+  group_by(MOI,Time) %>%
+  summarise(Delta = mean(growth),
+            se = sd(growth)/sqrt(length(growth)))
+
+
+# HA expression by flow cytometry (12 hours)
+NTJ29.Flow = read.csv(file = file.path(Data.Path,"NTJ29_Flow_Data.csv"), header = TRUE) %>%
+  group_by(MOI) %>%
+  summarise(HA.Prop = mean(HA_Cells),
+            HA.Prop.se = sd(HA_Cells)/sqrt(length(HA_Cells)),
+            HA.MFI = mean(HA_MFI),
+            HA.MFI.se = sd(HA_MFI)/sqrt(length(HA_MFI)))
+
+# Burst Size
+NTJ29.Burst = NTJ29 %>% 
+  filter(Time >= 12) %>%
+  mutate(Total.PFU = PFU * 2,
+         Burst = Total.PFU / ((1 - ppois(0, lambda = MOI, lower = TRUE)) * Cell.Num),
+         Amp = Total.PFU / (Cell.Num * MOI)) %>%
+  group_by(MOI,Time) %>%
+  summarise(se.Burst = sd(Burst)/sqrt(length(Burst)),
+            Burst = mean(Burst),
+            se.Amp = sd(Amp)/sqrt(length(Amp)),
+            Amp = mean(Amp))
+
+# Stock Plot ----
+Fig.5 = ggplot() +
+    theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5, color = "black"),
+        axis.line.y = element_line(size=0.5, color = "black"),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+# Figure 5A: Growth Curve ----
+
+NTJ29.Growth.Plot = Fig.5 +
+  geom_line(data = NTJ29.Sum %>% filter(MOI >= 1),
+            aes(x = Time,
+                y = Titer,
+                group = factor(MOI),
+                color = factor(MOI)),
+            lwd = 1) +
+  geom_errorbar(data = NTJ29.Sum %>% filter(MOI >= 1), aes(x = Time, group = MOI, ymin = Titer - se, ymax = Titer + se),
+                color = "black", 
+                width = 1,
+                lwd = .75) +
+  labs(x = "Time Post-Inoculation (Hours)",
+       y = TeX("\\textbf{Viral Titers ($\\log_1_0$ PFU/mL)}"),
+       color = "MOI (PFU/cell)") +
+  scale_color_viridis(discrete = TRUE) +
+  scale_x_continuous(limits = c(0,50), breaks = c(0,12,24,48)) +
+  geom_hline(yintercept = log10(50),lty = 2)
+
+# NTJ29.Legend = arrangeGrob(g_legend(NTJ29.Growth.Plot +theme(text = element_text(size = 12, face = "bold"))))
+# 
+# ggsave(NTJ29.Legend,
+#        file = "Figures/5Legend.pdf",
+#        dpi = 300,
+#        width = 5,
+#        height = 4,
+#        unit = "in")
+
+NTJ29.Growth.Plot + theme(legend.position = "NA")
+
+ggsave('Figures/5A_PFU_Growth_Curve.pdf',
+       dpi = 300,
+       width = 5,
+       height = 4,
+       unit = "in")
+
+# Figure 5B: %HA+ Cells vs. MOI ----
+Fig.5 +
+  geom_line(data = NTJ29.Flow %>% filter(MOI >= 0),
+            aes(x = MOI,
+                y = HA.Prop),
+            lwd = 1) + 
+  geom_errorbar(data = NTJ29.Flow %>% filter(MOI >= 0), aes(x = MOI, group = MOI, ymin = HA.Prop - HA.Prop.se, ymax = HA.Prop + HA.Prop.se),
+                color = "black",
+                width = .5,
+                lwd = .75) +
+  labs(x = "Multiplicity of Infection (PFU / cell)",
+       y = TeX("\\textbf{% Cells Expressing HA^+}")) +
+  scale_y_continuous(limits = c(0,100), breaks = c(0,20,40,60,80,100)) +
+  scale_x_continuous(limits = c(0,20), breaks = c(1,3,6,10,20))
+
+ggsave('Figures/5B_Percent_HA_Positive.pdf',
+       dpi = 300,
+       width = 5,
+       height = 4,
+       unit = "in")
+
+# Figure 5C: Burst Size vs. MOI ----
+
+Fig.5 +
+  geom_bar(data = NTJ29.Burst %>% filter(Time == 48, MOI >= 1),
+           stat = "identity",
+            aes(x = factor(MOI),
+                y = Burst,
+                group = MOI,
+                fill = (MOI)),
+            lwd = 1) +
+  scale_fill_viridis(trans = "log10") +
+  #  annotate("text",x = 2.5, y = 14,size = 5,label = TeX("\\textbf{Burst Size = 11.5 (10.6 - 12.5) PFU/cell}")) +
+  geom_errorbar(data = NTJ29.Burst %>% filter(Time == 48, MOI >= 1), aes(x = factor(MOI), group = MOI, ymin = Burst - se.Burst, ymax = Burst + se.Burst),
+                color = "black", 
+                width = .3,
+                lwd = .75) +
+  labs(x = "Multiplicity of Infection (PFU / cell)",
+       y = TeX("\\textbf{Burst Size (PFU / cell)}"),
+       fill = "MOI") +
+  scale_color_viridis(trans = "log10") +
+  scale_y_continuous(limits = c(0,15), breaks = c(0,5,10,15,20))
+
+ggsave('Figures/5C_Burst_Size.pdf',
+       dpi = 300,
+       width = 5,
+       height = 4,
+       unit = "in")
+
+# Supp Figure 3A: Virus production by time window ----
+
+ggplot() + 
+  geom_bar(data = NTJ29.Kinetics %>% filter(Time <= 24),
+           stat = "identity",
+           position = "dodge",
+             aes(x = factor(MOI),
+                 y = Delta,
+                 fill = MOI)) +
+  geom_errorbar(data = NTJ29.Kinetics,
+                position = "dodge",
+                aes(x = factor(MOI), ymin = Delta - se, ymax = Delta + se),
+                color = "black",
+                width = .3,
+                lwd = .75) +
+  facet_grid(.~Time,labeller = labeller(Time = c("12" = "8 h -> 12 h",
+                                                "16" = "12 h -> 16 h",
+                                                "24" = "16 h -> 24 h"))) +
+  scale_fill_viridis(trans = "log10") +
+  labs(x = "Multiplicity of Infection (PFU / cell)",
+       y = TeX("\\textbf{Virus Production ($\\log_1_0$ PFU)}")) +
+  theme(text=element_text(size=16,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks = element_line(size=0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+ggsave('Figures/Supp3A_Delta_PFU_Bars.pdf',
+       dpi = 300,
+       width = 8,
+       height = 6,
+       unit = "in")
+
+# Supp Figure 3B: HA Intensity vs. MOI ----
+ggplot() +
+  geom_line(data = NTJ29.Flow,
+            aes(x = MOI,
+                y = HA.MFI),
+            lwd = 1) + 
+  geom_errorbar(data = NTJ29.Flow, aes(x = MOI, group = MOI, ymin = HA.MFI - HA.MFI.se, ymax = HA.MFI + HA.MFI.se),
+                color = "black",
+                width = .5,
+                lwd = .75) +
+  labs(x = "Multiplicity of Infection (PFU / cell)",
+       y = TeX("\\textbf{HA Expression (Median FI)}")) +
+  scale_y_continuous(limits = c(0,20000), breaks = c(1000,5000,10000,15000,20000), labels = comma) +
+  scale_x_continuous(limits = c(0,21), breaks = c(1,3,6,10,20)) +
+  theme(text=element_text(size=12,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks = element_line(size=0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave('Figures/Supp3B_HA_MFI.pdf',
+       dpi = 300,
+       width = 4,
+       height = 3,
+       unit = "in")
+
+# Supp Figure 3C: Virus Amplification vs. MOI ----
+
+ggplot() +
+  geom_bar(data = NTJ29.Burst %>% filter(Time == 48, MOI >= 1),
+           stat = "identity",
+           aes(x = factor(MOI),
+               y = Amp,
+               group = MOI,
+               fill = MOI),
+           lwd = 1) +
+  scale_fill_viridis(trans = "log10") +
+  geom_errorbar(data = NTJ29.Burst %>% filter(Time == 48, MOI >= 1), aes(x = factor(MOI), group = MOI, ymin = Amp - se.Amp, ymax = Amp + se.Amp),
+                color = "black", 
+                width = .3,
+                lwd = .75) +
+  geom_hline(yintercept = 1,lty = 2) +
+  labs(x = "Multiplicity of Infection (PFU / cell)",
+       y = TeX("\\textbf{Virus Amplification (PFU output / input)}"),
+       fill = "MOI") +
+  scale_color_viridis(trans = "log10") +
+  scale_y_continuous(limits = c(0,7), breaks = c(0,1,2,3,4,5,6,7,8,10)) +
+  theme(text=element_text(size=12,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks = element_line(size=0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.0),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+ggsave('Figures/Supp3C_Virus_Amplification.pdf',
+       dpi = 300,
+       width = 4.5,
+       height = 3.6,
+       unit = "in")
+
+
+# Calculate CI for burst size -----
+NTJ29.Burst.Raw = NTJ29 %>% 
+  filter(Time >= 12) %>%
+  mutate(Total.PFU = PFU * 2,
+         Burst = Total.PFU / ((1 - ppois(0, lambda = MOI, lower = TRUE)) * Cell.Num),
+         Amp = Total.PFU / (Cell.Num * MOI))
+
+NTJ29.Burst.Raw %>% filter(Time == 48,
+                           MOI > 1) %>%
+  summarise(Burst.Mean = mean(Burst),
+            Burst.se = sd(Burst)/sqrt(length(Burst))) %>%
+  mutate(Burst.Max = Burst.Mean + 1.96 * Burst.se,
+         Burst.Min = Burst.Mean - 1.96 * Burst.se)
+# 11.5 (10.6 - 12.5)
+```
+
+```{r Figure 6, eval = TRUE}
+
+Fig.6 = ggplot() +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+  
+# Figure 6A: Percent Infected Cells Containing IVGs vs. MOI ----
+Fig.6 +
+  geom_line(data = Sum.Sim3 %>% filter(Pp %in% c(0.58)),
+            aes(x = log10(MOI),
+                y = Semi_Prop * 100,
+                group = Pp), lwd = 1.2, color = "black") +
+  scale_color_viridis(guide = FALSE, begin = 0.1, end = 0.9) +
+  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
+       y = TeX("\\textbf{% Infected Cells with IVGs}")) +
+  scale_x_continuous(limits = c(-2,2)) 
+
+ggsave('Figures/6A_Proportion_Infected_Cells_with_IVGs.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Figure 6B: Peak # Cells with IVGs vs. Diffusion Coefficient ----
+
+df1 = NTJ21.Peak %>%
+  group_by(Virus_D,Spread_Frac) %>%
+  summarise(Max_Semi = mean(Max_Semi))
+
+Fig.6 +
+  geom_point(data = df1,
+             aes(x = Virus_D,
+                 y = Max_Semi,
+                 color = Spread_Frac)) +
+  geom_smooth(data = df1,
+              aes(x = Virus_D,
+                  y = Max_Semi,
+                  group = Spread_Frac,
+                  color = Spread_Frac,
+                  fill = Spread_Frac),
+              lty = 1212,
+              alpha = 0.3) +
+  scale_y_continuous(limits = c(-100,3200), breaks = c(0,1000,2000,3000), labels = comma) +
+  labs(y = TeX("\\textbf{Peak # Cells with IVGs}"),
+       x = TeX("\\textbf{Diffusion Coefficient ($\\log_1_0$ $\\mu$m^2/s)}")) +
+  scale_color_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1"), guide = FALSE) +
+  scale_fill_manual(values = c("Diffusion Only" = "midnightblue","25% Local Spread" = "steelblue1"), guide = FALSE) +
+  geom_vline(xintercept = log10((5.825)), lty = 2) +
+  coord_cartesian(xlim = c(-0.5,4)) +
+  theme(legend.position = "NA")
+
+ggsave('Figures/6B_Max_Semi.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Figure 6D: Enrichment vs. % WT HA+ Cells ----
+
+NTJ52 = read.csv(file = file.path(Data.Path,"NTJ52_Data.csv"), header = TRUE) %>%
+  mutate(Expt = "NTJ52")
+NTJ53 = read.csv(file = file.path(Data.Path,"NTJ53_Data.csv"), header = TRUE) %>%
+  mutate(Expt = "NTJ53")
+NTJ54 = read.csv(file = file.path(Data.Path,"NTJ54_Data.csv"), header = TRUE) %>%
+  mutate(Expt = "NTJ54")
+
+NTJ54.Meta = rbind(NTJ52,NTJ53,NTJ54) %>%
+  mutate(var_HA = Both + HA,
+         WT_HA = Both + His,
+         inv_WT_HA = 1 / WT_HA,
+         Both_HA = Both,
+         WT_Alone = His / (His + Neg),
+         WT_Co = Both / (Both + HA),
+         Enrichment = ((WT_Co) - (WT_Alone)) / (WT_Alone) * 100)
+
+m1 = lm(data = NTJ54.Meta %>% filter(var_MOI * WT_MOI > 0),
+        formula = Enrichment ~ inv_WT_HA * Spread)
+summary(m1)
+
+newdata = matrix(ncol = 4,
+                 nrow = length(40:90)*2)
+colnames(newdata) = c("WT_HA","inv_WT_HA","Spread","Enrichment")
+
+newdata[,"WT_HA"] = rep(seq(from = 40, to = 90, by = 1),2)
+newdata[,"inv_WT_HA"] = 1/rep(seq(from = 40, to = 90, by = 1),2)
+newdata[,"Spread"] = c(rep(0,length(40:90)),rep(1,length(40:90)))
+newdata = as.data.frame(newdata)
+newdata$Enrichment = predict(m1,newdata,type="response",se.fit=TRUE)$fit
+newdata$se = predict(m1,newdata,type="response",se.fit=TRUE)$se.fit
+
+Fig.6 +
+  geom_point(data = NTJ54.Meta %>% filter(WT_MOI * var_MOI > 0),
+             aes(x = WT_HA,
+                 y = Enrichment,
+                 fill = factor(Spread),
+                 color = factor(Spread)),
+             shape = 21,
+             size = 4,
+             stroke = 2) + 
+  geom_line(data = newdata,
+            aes(x = WT_HA,
+                y = Enrichment,
+                group = Spread,
+                color = factor(Spread)),
+            lwd = 1.5) +
+  geom_ribbon(data = newdata %>% filter(Spread == 0),
+              aes(x = WT_HA,
+                  y = Enrichment,
+                  ymin = Enrichment - 1.96 * se,
+                  ymax = Enrichment + 1.96 * se,
+                  group = Spread),
+              fill = "navy",
+              alpha = 0.3) +
+    geom_ribbon(data = newdata %>% filter(Spread == 1),
+              aes(x = WT_HA,
+                  y = Enrichment,
+                  ymin = Enrichment - 1.96 * se,
+                  ymax = Enrichment + 1.96 * se,
+                  group = Spread),
+              fill = "green3",
+              alpha = 0.3) +
+  scale_x_continuous(limits = c(30,100)) +
+  scale_y_continuous(limits = c(-50, 450),breaks = c(0,100,200,300,400)) +
+  coord_cartesian(ylim = c(0,450)) +
+  scale_color_manual(values = c("0" = "navy","1" = "green3"),
+                     guide = FALSE) +
+  scale_fill_manual(values = c("0" = NA, "1" = "green3"),
+                    guide = FALSE) +
+  labs(x = TeX("\\textbf{% Cells WT HA^+}"),
+       y = "% WT Enrichment by Helper Virus")
+
+ggsave('Figures/6D_Spatial_Structure_and_Enrichment.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Supplemental Figure 4C: Fold Change in % WT HA + vs. var MOI ----
+NTJ51 = read.csv(file = file.path(Data.Path,"NTJ51_Data.csv"), header = TRUE) %>%
+  mutate(var_HA = Both + HA,
+         WT_HA = Both + His,
+         Both_HA = Both,
+         WT_Alone = His / (His + Neg),
+         WT_Co = Both / (Both + HA),
+         Enrichment = ((WT_Co) - (WT_Alone)) / (WT_Alone) * 100)
+
+WT_base = NTJ51 %>% filter(MOI == 0) %>% dplyr::select(WT_HA) %>% sum() / 3
+
+NTJ51 = NTJ51 %>% mutate(WT_add = WT_HA - WT_base,
+                         WT_amp = WT_HA / WT_base)
+
+Fig.6 +
+  geom_jitter(data = NTJ51 %>% filter(MOI > 0),
+              aes(x = MOI,
+                  y = WT_amp)) +
+  geom_smooth(data = NTJ51,
+              aes(x = MOI,
+                  y = WT_amp)) +
+  scale_x_continuous(trans = "log10") +
+  labs(y = "Fold Change %HA+ Cells (vs. No Help)",
+       x = "Helper MOI (PFU / cell)") +
+  geom_hline(yintercept = 1, lty = 2, lwd = 1.2) +
+
+
+ggsave('Figures/Supp4C_WT_HA_Fold_Change_from_Helper.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+# Supplemental Figure 4D: % VAR HA+ vs. % WT HA+ ----
+Fig.6 +
+  geom_point(data = NTJ54.Meta %>% filter(var_MOI > 0),
+             size = 3,
+             stroke = 2,
+             aes(x = WT_HA,
+                  y = var_HA,
+                  color = factor(Spread),
+                  shape = Expt,
+                  fill = factor(Spread))) +
+  labs(x = TeX("\\textbf{% WT HA^+}"),
+       y = TeX("\\textbf{% Helper HA^+}"),
+       fill = "2° Spread",
+       color = "2° Spread") +
+  scale_shape_manual(values = c("NTJ52" = 21,
+                                "NTJ53" = 22,
+                                "NTJ54" = 24),
+                     labels = c("NTJ52" = "1",
+                                "NTJ53" = "2",
+                                "NTJ54" = "3")) +
+  scale_color_manual(values = c("0" = "midnightblue", "1" = "green3")) +
+  scale_fill_manual(values = c("0" = NA, "1" = "green3"),guide = FALSE) +
+  scale_x_continuous(limits = c(0,100))
+
+ggsave('Figures/Supp4D_Helper_v_WT_HA_in_Co_Infected_Cells.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+var_M = lmer(data = NTJ54.Meta %>% filter(var_MOI > 0,
+                                      WT_MOI > 0),
+           formula = var_HA ~ WT_HA + Spread + (1|Expt))
+summary(var_M)
+
+t.test(NTJ54.Meta %>% filter(var_MOI > 0, WT_MOI > 0, Spread == 1) %>% dplyr::select(var_HA),
+       NTJ54.Meta %>% filter(var_MOI > 0, WT_MOI > 0, Spread == 0) %>% dplyr::select(var_HA))
+
+```
+
+```{r Figure 7, eval = TRUE}
+
+# Figure 7B: Measurement of RNA copies / mL M.STOP Virus Stock ----
+NTJ60 = read.csv(file = file.path(Data.Path,"NTJ60_Data.csv"), header = TRUE)
+
+NTJ60.ddPCR = NTJ60 %>% filter(Assay == "ddPCR",
+                               Type %in% c("Mwt","M2stop","NS")) %>%
+  dcast(Strain + Rep ~ Type) %>%
+  mutate(Mtotal = M2stop + Mwt) %>%
+  melt(id = c("Strain","Rep")) %>%
+  na.omit %>%
+  mutate(Locus = str_replace_all(variable,c("Mwt" = "M", "M2stop" = "M")),
+         variable = str_replace_all(variable,c("Mwt" = "M2.Only", "M2stop" = "M1.Only")))
+
+ggplot() +
+  geom_col(data = NTJ60.ddPCR %>% 
+             filter(variable != "Mtotal",
+                    Strain == "MUT") %>%
+             mutate(value = value * 20 / 4 * 40 * 20 / 12 * 60 / 280 * 1000 / 1e7),
+           aes(x = Locus,
+               y = value,
+               fill = variable),
+           color = "black",
+           position = "stack") +
+  facet_wrap(~Rep) +
+  scale_y_continuous(limits = c(0,10),breaks = 2 * 1:5, labels = comma) +
+  labs(x = NULL,
+       y = TeX("\\textbf{vRNA Concentration (copies * $10^7$ / mL)}"),
+       fill = "Segment") +
+  scale_fill_manual(values = c("M1.Only" = "steelblue",
+                               "M2.Only" = "lightgoldenrod",
+                               "NS" = "gray40")) +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x = element_blank(),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),face = "bold",color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+ggsave('Figures/7B_Segment_Copy_in_Pan99_M_STOP_Stocks.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+Legend.7B = ggplot() +
+  geom_col(data = NTJ60.ddPCR %>% 
+             filter(variable != "Mtotal",
+                    Strain == "MUT") %>%
+             mutate(value = value * 20 / 4 * 40 * 20 / 12 * 60 / 280 * 1000 / 1e7),
+           aes(x = Locus,
+               y = value,
+               fill = variable),
+           color = "black",
+           position = "stack") +
+  facet_wrap(~Rep) +
+  scale_y_continuous(limits = c(0,10),breaks = 2 * 1:5, labels = comma) +
+  labs(x = NULL,
+       y = TeX("\\textbf{vRNA Concentration (copies * $10^7$ / mL)}"),
+       fill = "Segment") +
+  scale_fill_manual(values = c("M1.Only" = "steelblue",
+                               "M2.Only" = "lightgoldenrod",
+                               "NS" = "gray40")) +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x = element_blank(),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),face = "bold",color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ggsave(g_legend(Legend.7B),
+       file = "Figures/7BLegend.pdf",
+       dpi = 300,
+       width = 4,
+       height = 3,
+       unit = "in")
+
+# Figure 7C: Dilution Series ----
+NTJ76 = read.csv(file = file.path(Data.Path,"NTJ76_Bayes.csv"), header = TRUE)
+
+NTJ76.Melt = NTJ76 %>% 
+  melt(id = "Dilution") %>%
+  dplyr::rename(Gate = variable,
+                Percent = value) %>%
+  mutate(Marker = substr(Gate,1,2),
+         Parent = str_c(substr(Gate,4,5),"+"),
+         Marker_Class = substr(Marker,1,1))
+
+m1 = lm(data = NTJ76.Melt %>% filter(Gate %in% c("HAgM1","HAgM2",
+                                                 "M1gM2","M2gM1")),
+        formula = Percent ~ Dilution * Gate)
+summary(m1)
+
+newdata = matrix(ncol = 4,
+                 nrow = 21 * 4,
+                 data = 0)
+colnames(newdata) = c("Dilution","Gate","Parent","Marker_Class")
+newdata = data.frame(newdata)
+newdata$Dilution = rep(0:20/10,4)
+newdata$Gate = rep(c("HAgM1","HAgM2","M1gM2","M2gM1"),each = 21)
+newdata$Parent = rep(c("M2","M1"),each = 21)
+newdata$Marker_Class = substr(newdata$Marker,1,1)
+newdata$Percent = predict(m1,newdata,type="response",se.fit=TRUE)$fit
+newdata$se = predict(m1,newdata,type="response",se.fit=TRUE)$se.fit
+
+ggplot() +
+  geom_jitter(data = NTJ76.Melt %>% filter(Gate %in% c("HAgM1","HAgM2",
+                                                       "M1gM2","M2gM1")),
+              aes(x = Dilution,
+                  y = Percent,
+                  color = Gate,
+                  fill = Gate,
+                  shape = Parent),
+              width = 0.1,
+              size = 2.5) +
+  geom_line(data = newdata,
+            aes(x = Dilution,
+                y = Percent,
+                group = Gate,
+                color = Gate),
+            lwd = 1.2) +
+  geom_ribbon(data = newdata,
+              aes(x = Dilution,
+                  ymin = Percent - 1.96 * se,
+                  ymax = Percent + 1.96 * se,
+                  group = Gate,
+                  fill = Gate),
+              alpha = 0.3) +
+  scale_fill_manual(values = c("HAgM1" = "red","HAgM2" = "orange","M1gM2" = "navy","M2gM1" = "skyblue")) +
+  scale_color_manual(values = c("HAgM1" = "red","HAgM2" = "orange","M1gM2" = "navy","M2gM1" = "skyblue")) +
+  scale_x_continuous(limits = c(-0.1,2.1)) +
+  scale_y_continuous(limits = c(-0.5,110),breaks = c(0,25,50,75,100)) +
+  scale_shape_manual(values = c(24:25)) +
+  labs(x = TeX("\\textbf{$\\log_1_0$ Stock Dilution}"),
+       y = TeX("\\textbf{% Protein-Expressing Cells}"),
+       color = "Protein",
+       fill = "Protein") +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),face = "bold",color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = c(2,2))
+
+ggsave('Figures/7C_Pan99_M_STOP_Dilution_Series_FACS.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+# Figure 7D: WT / M.STOP Ratios ----
+
+Measures = c("NS_ddPCR","M_ddPCR","HA_FACS","PFU","TCID50","GPID50")
+
+NTJ60.Ratios = matrix(ncol = 2,
+                      nrow = length(Measures),
+                      data = 0)
+
+colnames(NTJ60.Ratios) = c("Assay","Ratio")
+NTJ60.Ratios = data.frame(NTJ60.Ratios)
+NTJ60.Ratios[,"Assay"] = Measures
+NTJ60.Ratios[,"Ratio"] = as.numeric(0)
+
+# Ratios 1,2: M and NS RNA copies by ddPCR Titer ----
+
+NTJ60.ddPCR.Sum = NTJ60.ddPCR %>%
+  na.omit %>%
+  group_by(variable,Strain) %>%
+  dplyr::summarise(Copies = mean(value)) %>%
+  dcast(variable ~ Strain) %>%
+  filter(variable %in% c("NS","Mtotal")) %>%
+  mutate(Ratio = WT / MUT)
+
+NTJ60.Ratios[NTJ60.Ratios[,"Assay"] == "NS_ddPCR","Ratio"] = NTJ60.ddPCR.Sum %>% filter(variable == "NS") %>% dplyr::select(Ratio)
+NTJ60.Ratios[NTJ60.Ratios[,"Assay"] == "M_ddPCR","Ratio"] = NTJ60.ddPCR.Sum %>% filter(variable == "Mtotal") %>% dplyr::select(Ratio)
+
+# Ratio 3: HA FACS Immunotitration ----
+
+NTJ60.FACS = NTJ60 %>%
+  filter(Assay == "FACS") %>%
+  mutate(Dilution = -Dilution)
+
+WT.FACS = drm(data = NTJ60 %>% filter(Assay == "FACS",Strain == "WT", Type == "HA") %>% mutate(Dilution = -Dilution),
+              formula = Readout ~ Dilution,
+              fct = LL.5()) %>%
+  ED(50)
+
+M.STOP.FACS = drm(data = NTJ60 %>% filter(Assay == "FACS",Strain == "MUT", Type == "HA") %>% mutate(Dilution = -Dilution),
+                  formula = Readout ~ Dilution,
+                  fct = LL.5()) %>%
+  ED(50)
+
+NTJ60.Ratios[NTJ60.Ratios[,"Assay"] == "HA_FACS","Ratio"] = (10^(WT.FACS - M.STOP.FACS))[,"Estimate"]
+
+# Ratio 4: PFU / mL Titer ----
+NTJ60.PFU = NTJ60 %>% 
+  filter(Assay == "PFU")
+
+NTJ60.PFU.Sum = NTJ60.PFU %>% 
+  group_by(Strain) %>%
+  dplyr::summarise(PFU = mean(Readout))
+
+NTJ60.Ratios[NTJ60.Ratios[,"Assay"] == "PFU","Ratio"] = 
+  NTJ60.PFU.Sum %>% filter(Strain == "WT") %>% dplyr::select(PFU) /
+  NTJ60.PFU.Sum %>% filter(Strain == "MUT") %>% dplyr::select(PFU)
+
+# Ratio 5: TCID50 units / mL Titer ----
+NTJ60.TCID50 = NTJ60 %>% 
+  filter(Assay == "TCID50") %>%
+  mutate(Dilution = -Dilution)
+
+WT.TCID50 = drm(data = NTJ60 %>% filter(Assay == "TCID50",Strain == "WT") %>% mutate(Dilution = -Dilution),
+                formula = Readout ~ Dilution,
+                fct = LL.5()) %>%
+  ED(50)
+
+M.STOP.TCID50 = drm(data = NTJ60 %>% filter(Assay == "TCID50",Strain == "MUT") %>% mutate(Dilution = -Dilution),
+                    formula = Readout ~ Dilution,
+                    fct = LL.5()) %>%
+  ED(50)
+
+NTJ60.Ratios[NTJ60.Ratios[,"Assay"] == "TCID50","Ratio"] = (10^(WT.TCID50 - M.STOP.TCID50))[,"Estimate"]
+
+# WT / M.STOP Ratios for Figure 7D are normalized to NS RNA copy numbers in stocks
+# NS was chosen to avoid potentially confounding effects from the M segment mutations
+# Note that GPID50 titers are not normalized to relative amounts of NS RNA copies in the analysis because the doses used to generate ID50 curves were in terms of NS RNA copy numbers.
+NS_Ratio = (NTJ60.Ratios %>% filter(Assay == "NS_ddPCR") %>% dplyr::select(Ratio) %>% as.numeric)
+NTJ60.Ratios = NTJ60.Ratios %>%
+  mutate(Ratio = as.numeric(Ratio) / NS_Ratio)
+
+# Ratio 6: Guinea Pig ID50 ----
+NTJ.GP.ID50 = read.csv(file = file.path(Data.Path,"NTJ_GP_Infected.csv"), header = TRUE) %>%
+  mutate(Dose_Group = Dose_Group - 1) %>%
+  group_by(Strain, Dose_Group) %>%
+  dplyr::summarise(Infected = mean(Infected) * 100)
+
+WT.Model = drm(data = NTJ.GP.ID50 %>% filter(Strain == "WT"),
+               formula = Infected ~ Dose_Group,
+               fct = LL.5()) 
+MUT.Model = drm(data = NTJ.GP.ID50 %>% filter(Strain == "MUT"),
+                formula = Infected ~ Dose_Group,
+                fct = LL.4())
+
+NTJ60.Ratios[NTJ60.Ratios[,"Assay"] == "GPID50","Ratio"] = as.numeric(10 ^ (WT.Model %>% ED(50) - MUT.Model %>% ED(50)))[1]
+
+# Plot Ratios ----
+NTJ60.Ratios$Assay = factor(NTJ60.Ratios$Assay,levels = Measures)
+
+ggplot() +
+  geom_bar(data = NTJ60.Ratios,
+           stat = "identity",
+           aes(x = Assay,
+               y = Ratio %>% as.numeric),
+           color = "black",
+           lwd = 1,
+           fill = "black") +
+  scale_y_continuous(trans = "log10", limits = c(0.1,1000), breaks = c(1,10,100,1000), labels = comma) +
+  labs(x = "Method",
+       y = "Ratio WT / M.STOP") +
+  coord_cartesian(ylim = c(1,1000)) +
+  scale_x_discrete(labels = c("NS ddPCR",
+                              "M ddPCR",
+                              "HA FACS",
+                              "PFU",
+                              "TCID  ",
+                              "GPID  ")) +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
+        strip.text.y=element_text(size=rel(1.5),margin=margin(0,0,0,0),angle=0),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=45,hjust = 1,vjust=1,size=rel(1.5),face = "bold",color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "NA")
+
+ggsave('Figures/7D_Pan99_WT_vs_M_STOP_Ratios.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+NTJ60.Ratios
+```
+
+```{r Figure 8, eval = TRUE}
+
+# For ddPCR, the limit of detection is 1 cDNA copy / 20 uL reaction, or 0.05 copies / uL
+# cDNA copies / uL ddPCR reaction * 20 / 4 * 40 * 20 / 12.8 * 60 / 140 * 1000 = RNA copies / mL sample
+RNA_LOD = log10(0.05 * 
+  20 / # 20 uL Reacion
+  4 * # 4 uL / Reaction
+  40 * # 1:40 Dilution of cDNA
+  20 / # 20 uL cDNA / RT reaction
+  12.8 * # 12.uL RNA / RT reaction
+  60 / # Total RNA extracted
+  140 * # uL volume virus used
+  1000) # uL -> mL
+
+Fig.8 = ggplot() +
+  labs(y = TeX("\\textbf{Viral Shedding ($\\log_1_0$ RNA copies / mL)}"),
+       x = "Time Post-Inoculation (Days)") +
+  geom_hline(yintercept = RNA_LOD,lty = 2) +
+  scale_y_continuous(limits = c(3.75,8.75),breaks = 4:8) +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x = element_blank(),
+        strip.text.y = element_blank(),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+# Figure 8A: WT vs. M.STOP Shedding ----
+GP_NS = read.csv(file = file.path(Data.Path,"NTJ69_NTJ73_RNA_Data.csv"), header = TRUE) %>%
+  mutate(RNA_Shed = log10(RNA_Conc * 
+                            20 / # 20 uL Reacion
+                            4 * # 4 uL / Reaction
+                            40 * # 1:40 Dilution
+                            20 /
+                            12.8 * # RNA / cDNA reaction
+                            60 / # Total RNA extracted
+                            140 * # volume virus used
+                            1000), # uL -> mL
+         Virus = recode(Strain,"MUT" = "M.STOP") %>% factor(levels = c("WT","M.STOP")))
+
+Fig.8 +
+  geom_line(data = GP_NS,
+            aes(x = Day,
+                y = RNA_Shed,
+                color = Virus,
+                group = GP),
+            lwd = 1.1) +
+  labs(y = TeX("\\textbf{Viral Shedding ($\\log_1_0$ RNA copies / mL)}"),
+       x = "Time Post-Inoculation (Days)") +
+  scale_x_continuous(breaks = c(1,2,3,5,7)) +
+  scale_color_manual(values = c("WT" = "black",
+                                "M.STOP" = "mediumseagreen")) +
+  geom_hline(yintercept = RNA_LOD,lty = 2) + 
+  theme(legend.position = "NA")
+
+ggsave('Figures/8A_Pan99_WT_M_STOP_Shedding_Comparison.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+Legend.8A = Fig.8 +
+  geom_line(data = GP_NS,
+            aes(x = Day,
+                y = RNA_Shed,
+                color = Virus,
+                group = GP),
+            lwd = 1.1) +
+  labs(y = TeX("\\textbf{Viral Shedding ($\\log_1_0$ RNA copies / mL)}"),
+       x = "Time Post-Inoculation (Days)") +
+  scale_x_continuous(breaks = c(1,2,3,5,7)) +
+  scale_color_manual(values = c("WT" = "black",
+                                "M.STOP" = "mediumseagreen")) +
+  geom_hline(yintercept = RNA_LOD,lty = 2)
+
+Fig.8A.Legend = arrangeGrob(g_legend(Legend.8A))
+
+ggsave(Fig.8A.Legend,
+       file = "Figures/8A_Legend.pdf",
+       dpi = 300,
+       width = 4,
+       height = 3,
+       unit = "in")
+
+# Figure 8B: WT Dose Comparison----
+
+NTJ77 = read.csv(file = file.path(Data.Path,"NTJ77_Data.csv"), header = TRUE)
+
+Neg_RNA = NTJ77 %>% filter(Dose == "Neg") %>% dplyr::select(RNA_Conc) %>% as.numeric
+
+NTJ77 = NTJ77 %>%
+  mutate(RNA_Shed = log10(pmax(Neg_RNA, RNA_Conc) * 
+                            20 / # 20 uL Reacion
+                            4 * # 4 uL / Reaction
+                            40 * # 1:40 Dilution of cDNA
+                            20 / # 20 uL cDNA / RT reaction
+                            12.8 * # RNA / RT reaction
+                            60 / # Total RNA extracted
+                            140 * # volume virus used
+                            1000)) # uL -> mL
+
+Fig.8 +
+  geom_line(data = NTJ77 %>% filter(Dose != "Neg"),
+            aes(x = Day,
+                y = RNA_Shed,
+                group = GP,
+                lty = Dose),
+            lwd = 1.2) +
+  labs(linetype = "WT Dose") +
+  scale_x_continuous(breaks = c(1,2,3,5,7)) +
+  theme(legend.position = "NA")
+
+ggsave('Figures/8B_Pan99_WT_Shedding_High_vs_Low_Dose.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+Legend.8B = Fig.8 +
+  geom_line(data = NTJ77 %>% filter(Dose != "Neg"),
+            aes(x = Day,
+                y = RNA_Shed,
+                group = GP,
+                lty = Dose),
+            lwd = 1.2) +
+  labs(linetype = "WT Dose") +
+  scale_x_continuous(breaks = c(1,2,3,5,7))
+
+Fig.8B.Legend = arrangeGrob(g_legend(Legend.8B))
+
+ggsave(Fig.8B.Legend,
+       file = "Figures/8B_Legend.pdf",
+       dpi = 300,
+       width = 4,
+       height = 3,
+       unit = "in")
+
+# Figure 8C: Transmission ----
+NTJ74.Short = read.csv(file = file.path(Data.Path,"NTJ74_ddPCR_Data.csv"), header = TRUE)
+
+NTJ74.Long = NTJ74.Short %>% melt(id = c("GP","Pair","Cage","Status","Strain")) %>%
+  dplyr::rename(Day = variable,
+         RNA = value) %>%
+  mutate(Day = as.factor(Day) %>% recode_factor("X2" = 2, "X4" = 4, "X6" = 6,  "X8" = 8) %>% paste %>% as.numeric,
+         Strain = str_replace(Strain,"MUT","M.STOP"),
+         Strain = factor(Strain,levels = c("WT","M.STOP")),
+         RNA = log10(RNA * 
+                       20 / # 20 uL Reacion
+                       4 * # 4 uL cDNA/ Reaction
+                       40 * # 1:40 Dilution
+                       20 /
+                       12.8 * # RNA / cDNA reaction
+                       60 / # Total RNA extracted
+                       140 * # volume virus used
+                       1000), # uL -> mL)
+         Virus = Strain)
+
+Fig.8 +
+  geom_line(data = NTJ74.Long %>% filter(Strain == "WT"),
+            aes(x = Day,
+                y = RNA,
+                linetype = Status,
+                color = Virus,
+                group = GP),
+            lwd = 1.1) +
+  facet_grid(~ Cage) +
+  scale_x_continuous(breaks = c(2,4,6,8)) +
+  scale_color_manual(values = c("WT" = "black",
+                                "M.STOP" = "mediumseagreen")) +
+  geom_hline(yintercept = RNA_LOD,lty = 2) +
+  theme(legend.position = "NA")
+
+ggsave('Figures/8C_Pan99_WT_vs_M_STOP_Transmission_RNA.pdf',
+       width = 10,
+       height = 5,
+       unit = "in")
+
+Fig.8 +
+  geom_line(data = NTJ74.Long %>% filter(Strain == "M.STOP"),
+            aes(x = Day,
+                y = RNA,
+                linetype = Status,
+                color = Virus,
+                group = GP),
+            lwd = 1.1) +
+  facet_grid(~ Cage) +
+  scale_x_continuous(breaks = c(2,4,6,8)) +
+  scale_color_manual(values = c("WT" = "black",
+                                "M.STOP" = "mediumseagreen")) +
+  geom_hline(yintercept = RNA_LOD,lty = 2) +
+  theme(legend.position = "NA")
+
+ggsave('Figures/8D_Pan99_WT_vs_M_STOP_Transmission_RNA.pdf',
+       width = 10,
+       height = 5,
+       unit = "in")
+
+Legend.Fig.8C = Fig.8 +
+  geom_line(data = NTJ74.Long,
+            aes(x = Day,
+                y = RNA,
+                linetype = Status,
+                color = Virus,
+                group = GP),
+            lwd = 1.1) +
+  facet_grid(~ Cage) +
+  scale_x_continuous(breaks = c(2,4,6,8)) +
+  scale_color_manual(values = c("WT" = "black",
+                                "M.STOP" = "mediumseagreen")) +
+  geom_hline(yintercept = RNA_LOD,lty = 2)
+
+Fig.8C.Legend = arrangeGrob(g_legend(Legend.Fig.8C))
+
+ggsave(Fig.8C.Legend,
+       file = "Figures/8Legend.pdf",
+       dpi = 300,
+       width = 4,
+       height = 3,
+       unit = "in")
+
+NTJ69.ddPCR = read.csv(file = file.path(Proj.Home,"Data","NTJ69_ddPCR_Data.csv")) %>%
+  mutate(M = M1 + M2,
+         M1_Frac = M1 / M,
+         M2_Frac = M2 / M,
+         M_NS = M / NS,
+         M = log10(M * 20 / 4 * 40 * 20 / 12.8 * 60 / 140 * 1000),
+         M1 = log10(M1 * 20 / 4 * 40 * 20 / 12.8 * 60 / 140 * 1000),
+         M2 = log10(M2 * 20 / 4 * 40 * 20 / 12.8 * 60 / 140 * 1000),
+         NS = log10(NS * 20 / 4 * 40 * 20 / 12.8 * 60 / 140 * 1000))
+
+NTJ60.ddPCR = read.csv(file = file.path(Proj.Home,"Data","NTJ60_Data.csv"), header = TRUE) %>% filter(Assay == "ddPCR",
+                               Type %in% c("Mwt","M2stop","NS")) %>%
+  dcast(Strain + Rep ~ Type) %>%
+  mutate(Mtotal = M2stop + Mwt) %>%
+  melt(id = c("Strain","Rep")) %>%
+  na.omit %>%
+  mutate(Locus = str_replace_all(variable,c("Mwt" = "M", "M2stop" = "M")),
+         variable = str_replace_all(variable,c("Mwt" = "M2.Only", "M2stop" = "M1.Only")))
+
+M1 = NTJ60.ddPCR %>% filter(variable == "M1.Only", Strain == "MUT") %>% select(value)
+M2 = NTJ60.ddPCR %>% filter(variable == "M2.Only", Strain == "MUT") %>% select(value)
+NS = NTJ60.ddPCR %>% filter(variable == "NS", Strain == "MUT") %>% select(value)
+Stock_M1_Frac = mean((M1 /(M1 + M2))$value)
+Stock_M2_Frac = mean((M2 /(M1 + M2))$value)
+Stock_M_NS = mean(((M1 + M2)/(NS))$value)
+Stock.ddPCR = NTJ69.ddPCR %>% filter(Day == 1) %>%
+  mutate(Day = 0,
+         M1 = 0,
+         M2 = 0,
+         NS = 0,
+         M = 0,
+         M1_Frac = Stock_M1_Frac,
+         M2_Frac = Stock_M2_Frac,
+         M_NS = Stock_M_NS)
+Rescue.ddPCR = Stock.ddPCR %>%
+  mutate(Day = -1,
+         M1_Frac = 0.5,
+         M2_Frac = 0.5,
+         M_NS = 1)
+MSTOP.ddPCR = rbind(Rescue.ddPCR,Stock.ddPCR,NTJ69.ddPCR)
+
+
+ggplot() +
+  geom_segment(aes(x = -0.5, y = .9, xend = -0, yend = Stock_M1_Frac),lty = 2) +
+  geom_segment(aes(x = -0.5, y = .9, xend = -0, yend = Stock_M2_Frac),lty = 2) +
+  geom_segment(aes(x = -1, y = 0.05, xend = -1, yend = 0.5),lty = 2) +
+  geom_text(aes(x = -1,y = 0,label = "Rescue",fontface = "bold", size = 14)) +
+  geom_text(aes(x = -0.5,y = 0.95,label = "Inoculum",fontface = "bold", size = 14)) +
+  geom_line(data = MSTOP.ddPCR,
+             aes(x = Day,
+                 y = M1_Frac,
+                 group = GP),
+            lwd = 1.2,
+            color = "steelblue") + 
+  geom_line(data = MSTOP.ddPCR,
+            aes(x = Day,
+                y = M2_Frac,
+                group = GP),
+            lwd = 1.2,
+            color = "lightgoldenrod") +
+  geom_point(data = Stock.ddPCR %>% melt(id = c("GP","Day")) %>% filter(variable %in% c("M1_Frac","M2_Frac")),
+             aes(x = Day,
+                 y = value,
+                 fill = variable),
+             pch = 21,
+             stroke = 2,
+             size = 5) +
+  geom_point(data = Rescue.ddPCR,
+             aes(x = Day,
+                 y = M1_Frac),
+             fill = "mediumseagreen",
+             pch = 21,
+             stroke = 2,
+             size = 5) +
+  labs(x = "Time (Days Post-Inoculation)",
+       y = "Proportion of Total M Segments") +
+  scale_fill_manual(values = c("M1_Frac" = "steelblue", "M2_Frac" = "lightgoldenrod")) +
+  scale_x_continuous(breaks = c(0,1,2,3),
+                     limits = c(-1.25,3)) +
+  scale_y_continuous(limits = c(0,1)) +
+  theme(text=element_text(size=14,face="bold"),
+        strip.text.x = element_blank(),
+        strip.text.y = element_blank(),
+        strip.background = element_blank(),
+        plot.title = element_text(size=rel(1.5)),
+        axis.text.x=element_text(angle=0,vjust=0,size=rel(1.5),color = "black"),
+        axis.text.y=element_text(size=rel(1.5),color = "black"),
+        axis.line.x = element_line(size=0.5),
+        axis.line.y = element_line(size=0.5),
+        axis.ticks.x = element_line(size=0.5, color = "black"),
+        axis.ticks.y = element_line(size = 0.5, color = "black"),
+        axis.title.y = element_text(size=rel(1.2),color = "black"),
+        axis.title.x = element_text(size=rel(1.2)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        legend.position = c(2,2))
+
+ggsave('Figures/Supp5B_M1_M2_Ratio.pdf',
+       width = 5,
+       height = 5,
+       unit = "in")
+
+```
