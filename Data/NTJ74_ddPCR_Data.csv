@@ -1,0 +1,17 @@
+﻿GP,Pair,Cage,Status,Strain,2,4,6,8
+1,1,1,Exposed,MUT,0,0,0,0
+2,1,1,Inoculated,MUT,14,77.9,40.6,0
+3,2,2,Exposed,MUT,0,0.07,0.07,0
+4,2,2,Inoculated,MUT,24.1,90,0.42,0.07
+5,3,3,Exposed,MUT,0,0.45,0,0.1
+6,3,3,Inoculated,MUT,34.3,6.3,7.6,0.1
+7,4,4,Exposed,MUT,0,0,0,0.08
+8,4,4,Inoculated,MUT,5.3,26.2,5.2,0
+9,5,1,Exposed,WT,0,0.77,62.8,21.7
+10,5,1,Inoculated,WT,149,23,0,0.07
+11,6,2,Exposed,WT,0,0,0,2.3
+12,6,2,Inoculated,WT,2.7,65.5,6.1,0
+13,7,3,Exposed,WT,0.07,51.4,121,5.8
+14,7,3,Inoculated,WT,1042,416,53.7,0.6
+15,8,4,Exposed,WT,0,0.06,0.13,1.7
+16,8,4,Inoculated,WT,4,88,4.6,0.14
