@@ -5,7 +5,7 @@ date: "5/14/2019"
 output: html_document
 ---
 
-```{r setup, include = FALSE}
+```{r setup, eval = TRUE, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 require(knitr) # Version 1.21
 require(drc) # Version 3.0-1
@@ -33,7 +33,7 @@ g_legend<-function(a.gplot){
   legend
 }
 
-Proj.Home = "/Users/Nate/Box Sync/Lowen_Lab/Data_Notebook/Documentation" #For Nate's Macbook Pro
+Proj.Home = "/Users/Nate/Box Sync/Lowen_Lab/Data_Notebook/Documentation/Pan99_IVGs_Spatial_Structure" #For Nate's Macbook Pro
 Data.Path = file.path(Proj.Home,"Data")
 setwd(Proj.Home)
 ```
@@ -417,6 +417,10 @@ ggsave("Figures/1A_Pp_By_Segment.pdf",
        height = 5,
        unit = "in")
 
+write.csv(Exp.Pp %>% dplyr::select(Rep,Segment,Pp), file = file.path(Data.Path,"Fig1A_Data.csv"), row.names = FALSE)
+
+# Legend
+
 Legend.1AB = Fig.1 +
   geom_jitter(data = Exp.Pp,
               aes(x = Segment,
@@ -477,6 +481,10 @@ ggsave("Figures/1B_Predicted_Reassortment.pdf",
        height = 5,
        unit = "in")
 
+write.csv(rbind(Pp_Reassortment_Predict %>% dplyr::select(Rep,Expressing.HA,Reassortant.Percent),
+                Pp1_Reassortment_Predict %>% mutate(Rep = "Pp_1") %>% dplyr::select(Rep,Expressing.HA,Reassortant.Percent),
+                FM.Data %>% mutate(Rep = "Fonville_Marshall_Experiments")), file = file.path(Data.Path,"Fig1B_Data.csv"), row.names = FALSE)
+
 # Figure 1C: Pairwise Segment Correlations ----
 # Calculate Genotype #s and p(1 virion | Genotype)
 SCA.Weights = Weight.Calc(Test.SCA = SCA.Data %>% filter(Delay == 0,
@@ -527,6 +535,8 @@ ggsave("Figures/Supp1_Weight_by_Segment.pdf",
        width = 5,
        height = 4,
        unit = "in")
+
+write.csv(SCA.Weights %>% filter(WT.Segments >= 1) %>% select(Expt,Cell.ID:Help.PB1,p1.Virion,Genotype), file = file.path(Data.Path,"Supp1_Data.csv"), row.names = FALSE)
 
 # Plotting Correlation ----
 Flu.Genes = c("PB2","PB1","PA","HA","NP","NA","M","NS")
@@ -632,6 +642,8 @@ ggsave("Figures/1C_Pairwise_Correlation_r2.pdf",
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(Sum.df %>% dplyr::select(X,Y,r,r2,p), file = file.path(Data.Path,"Fig1C_Data.csv"), row.names = FALSE)
 
 Legend.1C = ggplot() +
   coord_equal() +
@@ -1083,6 +1095,7 @@ ggsave("Figures/2A_Segments_from_1_Virion.pdf",
        height = 5,
        unit = "in")
 
+write.csv(Segment.Probs %>% filter(Virion == 1, floor(Pp*100) %in% c(10,58,90)), file = file.path(Data.Path,"Fig2A_Data.csv"), row.names = FALSE)
 # Figure 2B: % Fully Infectious Virions ----
 Fig.2 +
   geom_line(data = Geom,
@@ -1118,6 +1131,9 @@ ggsave("Figures/2B_Percent_Fully_Infectious_Particles.pdf",
        height = 5,
        unit = "in")
 
+write.csv(Geom %>% mutate(Fully_Infectious = Particle_PFU * 100) %>% dplyr::select(Pp,Fully_Infectious), 
+          file = file.path(Data.Path,"Fig2B_Data.csv"), row.names = FALSE)
+
 # Figure 2C: p(Productive) vs. Virion Number ----
 Fig.2 +
   geom_line(data = Segment.Probs %>% filter(Segments == 8,
@@ -1137,6 +1153,9 @@ ggsave("Figures/2C_Percent_Cells_Productive_v_Virion_Number.pdf",
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(Segment.Probs %>% filter(Segments == 8, floor(Pp*100) %in% c(10,58,90)) %>% dplyr::select(Pp,Virion,Prob), 
+          file = file.path(Data.Path,"Fig2C_Data.csv"), row.names = FALSE)
 
 # Figure 2D: Infectious Unit vs. Pp ----
 Fig.2 + 
@@ -1187,6 +1206,9 @@ ggsave("Figures/2D_Infectious_Unit_with_Data.pdf",
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(Geom %>% dplyr::select(Pp,Inf.Unit), 
+          file = file.path(Data.Path,"Fig2D_Data.csv"), row.names = FALSE)
 
 tau = matrix(nrow = 1,
              ncol = 9,
@@ -1320,6 +1342,9 @@ ggsave('Figures/3A_Populations_Infected.pdf',
        height = 5,
        unit = "in")
 
+write.csv(Sum.Sim3 %>% filter(Pp != 0.58) %>% dplyr::select(Pp,MOI,Infected), 
+          file = file.path(Data.Path,"Fig3A_Data.csv"), row.names = FALSE)
+
 # Figure 3B: Population ID50 vs. Pp ----
 
 Pop.ID50 = matrix(nrow = 10,
@@ -1373,6 +1398,8 @@ ggsave('Figures/3B_Population_ID50.pdf',
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(Pop.ID50 %>% rename(Complementation_ID50 = ID50, No_Complementation_ID50 = MOI_Full) %>% select(Pp, Complementation_ID50, No_Complementation_ID50),file = file.path(Data.Path,"Fig3B_Data.csv"), row.names = FALSE)
 
 Fig.3 +
   geom_line(data=Sum.Sim3,aes(x = log10(MOI),
@@ -1501,6 +1528,11 @@ ggsave('Figures/4A_r0_Raw.pdf',
        width = 6,
        height = 6,
        unit = "in")
+write.csv(df, file = file.path(Data.Path,"Fig4A_Data.csv"), row.names = FALSE)
+write.csv(NTJ21.Hours %>%
+  filter(t == Early.Time) %>%
+  mutate(r0 = pmax(log10(Productive),0)) %>%
+  select(Pp,Virus_D,Spread_Frac,Sim,r0), file = file.path(Data.Path,"Fig4A_Full_Data.csv"), row.names = FALSE)
 
 # Figure 4B: Reduction in Initial Growth Rate ----
 
@@ -1545,6 +1577,11 @@ ggsave('Figures/4B_r0_Reduction.pdf',
        width = 6,
        height = 6,
        unit = "in")
+
+write.csv(df3, file = file.path(Data.Path,"Fig4B_Data.csv"), row.names = FALSE)
+
+write.csv(right_join(df1,df2) %>%
+  mutate(Cost = (1 - (Slope / Intact_r0)) * 100), file = file.path(Data.Path,"Fig4B_Full_Data.csv"), row.names = FALSE)
 
 # Figure 4C: Increase in Time to Infect 100 Cells ----
 Target_Cells = 100
@@ -1592,6 +1629,10 @@ ggsave('Figures/4C_Increase_in_Time_to_100_Cells.pdf',
        width = 6,
        height = 6,
        unit = "in")
+
+write.csv(df3, file = file.path(Data.Path,"Fig4C_Data.csv"), row.names = FALSE)
+write.csv(right_join(df1,df2) %>%
+  mutate(Target_Cell_Cost = (To_Target_Cells - Intact_To_Target_Cells) / Intact_To_Target_Cells * 100), file = file.path(Data.Path,"Fig4C_Full_Data.csv"), row.names = FALSE)
 
 # Figure 4D: Increase in Time to Produce 10^5 Virions ----
 
@@ -1641,6 +1682,11 @@ ggsave('Figures/4D_Increase_in_Time_to_1e5_Virions.pdf',
        height = 6,
        unit = "in")
 
+write.csv(df3, file = file.path(Data.Path,"Fig4D_Data.csv"), row.names = FALSE)
+
+write.csv(right_join(df1,df2) %>%
+  mutate(Target_Virion_Cost = (To_Target_Virions - Intact_To_Target_Virions) / Intact_To_Target_Virions * 100), file = file.path(Data.Path,"Fig4D_Full_Data.csv"), row.names = FALSE)
+
 
 # Supplemental Figure 2: Representative Time Course of Productive Cells vs. Time ----
 ggplot() +
@@ -1677,6 +1723,8 @@ ggsave('Figures/Supp2A_Time_Course_Pp1.pdf',
        height = 5,
        unit = "in")
 
+write.csv(NTJ21.Hours %>% filter(Pp == 1,Sim == 1,Spread_Frac == "Diffusion Only") %>% select(t,Pp,Virus_D,Productive), file = file.path(Data.Path,"Supp2A_Data.csv"), row.names = FALSE)
+
 ggplot() +
   geom_line(data = NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only"),
             aes(x = t,
@@ -1710,6 +1758,8 @@ ggsave('Figures/Supp2C_Time_Course_Pp_058_.pdf',
        width = 6,
        height = 5,
        unit = "in")
+
+write.csv(NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only") %>% select(t,Pp,Virus_D,Productive), file = file.path(Data.Path,"Supp2C_Full_Data.csv"), row.names = FALSE)
 
 # Supplemental Figure 2: Representative Time Courses of Virions vs. Time ----
 ggplot() +
@@ -1745,6 +1795,9 @@ ggsave('Figures/Supp2B_Virion_Time_Course_PP1.pdf',
        height = 5,
        unit = "in")
 
+
+write.csv(NTJ21.Hours %>% filter(Pp == 1,Sim == 1,Spread_Frac == "Diffusion Only") %>% select(t,Pp,Virus_D,Virions), file = file.path(Data.Path,"Supp2B_Data.csv"), row.names = FALSE)
+
 ggplot() +
   geom_line(data = NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only"),
             aes(x = t,
@@ -1777,6 +1830,8 @@ ggsave('Figures/Supp2D_Virion_Time_Course_Pp_058.pdf',
        width = 6,
        height = 5,
        unit = "in")
+
+write.csv(NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only") %>% select(t,Pp,Virus_D,Virions), file = file.path(Data.Path,"Supp2D_Data.csv"), row.names = FALSE)
 
 D_Legend = ggplot() +
   geom_line(data = NTJ21.Hours %>% filter(Pp == 0.575,Sim == 1,Spread_Frac == "Diffusion Only"),
@@ -1979,6 +2034,8 @@ ggsave('Figures/5A_PFU_Growth_Curve.pdf',
        height = 4,
        unit = "in")
 
+write.csv(NTJ29.Sum, file = file.path(Data.Path,"Fig5A_Data.csv"), row.names = FALSE)
+
 # Figure 5B: %HA+ Cells vs. MOI ----
 Fig.5 +
   geom_line(data = NTJ29.Flow %>% filter(MOI >= 0),
@@ -1999,6 +2056,8 @@ ggsave('Figures/5B_Percent_HA_Positive.pdf',
        width = 5,
        height = 4,
        unit = "in")
+
+write.csv(NTJ29.Flow, file = file.path(Data.Path,"Fig5B_Data.csv"), row.names = FALSE)
 
 # Figure 5C: Burst Size vs. MOI ----
 
@@ -2027,6 +2086,8 @@ ggsave('Figures/5C_Burst_Size.pdf',
        width = 5,
        height = 4,
        unit = "in")
+
+write.csv(NTJ29.Burst %>% filter(Time == 48, MOI >= 1), file = file.path(Data.Path,"Fig5C_Data.csv"), row.names = FALSE)
 
 # Supp Figure 3A: Virus production by time window ----
 
@@ -2072,6 +2133,8 @@ ggsave('Figures/Supp3A_Delta_PFU_Bars.pdf',
        height = 6,
        unit = "in")
 
+write.csv(NTJ29.Kinetics %>% filter(Time <= 24), file = file.path(Data.Path,"Supp3A_Data.csv"), row.names = FALSE)
+
 # Supp Figure 3B: HA Intensity vs. MOI ----
 ggplot() +
   geom_line(data = NTJ29.Flow,
@@ -2107,6 +2170,8 @@ ggsave('Figures/Supp3B_HA_MFI.pdf',
        width = 4,
        height = 3,
        unit = "in")
+
+write.csv(NTJ29.Flow, file = file.path(Data.Path,"Supp3B_Data.csv"), row.names = FALSE)
 
 # Supp Figure 3C: Virus Amplification vs. MOI ----
 
@@ -2151,6 +2216,8 @@ ggsave('Figures/Supp3C_Virus_Amplification.pdf',
        width = 4.5,
        height = 3.6,
        unit = "in")
+
+write.csv(NTJ29.Burst %>% filter(Time == 48, MOI >= 1), file = file.path(Data.Path,"Supp3C_Data.csv"), row.names = FALSE)
 
 
 # Calculate CI for burst size -----
@@ -2205,6 +2272,9 @@ ggsave('Figures/6A_Proportion_Infected_Cells_with_IVGs.pdf',
        height = 5,
        unit = "in")
 
+write.csv(Sum.Sim3 %>% filter(Pp %in% c(0.58)),
+          file = file.path(Data.Path,"Fig6A_Data.csv"), row.names = FALSE)
+
 # Figure 6B: Peak # Cells with IVGs vs. Diffusion Coefficient ----
 
 df1 = NTJ21.Peak %>%
@@ -2237,6 +2307,9 @@ ggsave('Figures/6B_Max_Semi.pdf',
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(df1,
+          file = file.path(Data.Path,"Fig6B_Data.csv"), row.names = FALSE)
 
 # Figure 6D: Enrichment vs. % WT HA+ Cells ----
 
@@ -2317,6 +2390,9 @@ ggsave('Figures/6D_Spatial_Structure_and_Enrichment.pdf',
        height = 5,
        unit = "in")
 
+write.csv(NTJ54.Meta %>% filter(WT_MOI * var_MOI > 0),
+          file = file.path(Data.Path,"Fig6D_Data.csv"), row.names = FALSE)
+
 # Supplemental Figure 4C: Fold Change in % WT HA + vs. var MOI ----
 NTJ51 = read.csv(file = file.path(Data.Path,"NTJ51_Data.csv"), header = TRUE) %>%
   mutate(var_HA = Both + HA,
@@ -2349,6 +2425,9 @@ ggsave('Figures/Supp4C_WT_HA_Fold_Change_from_Helper.pdf',
        height = 5,
        unit = "in")
 
+write.csv(NTJ51 %>% filter(MOI > 0),
+          file = file.path(Data.Path,"Supp4C_Data.csv"), row.names = FALSE)
+
 # Supplemental Figure 4D: % VAR HA+ vs. % WT HA+ ----
 Fig.6 +
   geom_point(data = NTJ54.Meta %>% filter(var_MOI > 0),
@@ -2377,6 +2456,9 @@ ggsave('Figures/Supp4D_Helper_v_WT_HA_in_Co_Infected_Cells.pdf',
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(NTJ54.Meta %>% filter(var_MOI > 0),
+          file = file.path(Data.Path,"Supp4D_Data.csv"), row.names = FALSE)
 
 var_M = lmer(data = NTJ54.Meta %>% filter(var_MOI > 0,
                                       WT_MOI > 0),
@@ -2442,6 +2524,12 @@ ggsave('Figures/7B_Segment_Copy_in_Pan99_M_STOP_Stocks.pdf',
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(NTJ60.ddPCR %>% 
+             filter(variable != "Mtotal",
+                    Strain == "MUT") %>%
+             mutate(value = value * 20 / 4 * 40 * 20 / 12 * 60 / 280 * 1000 / 1e7),
+          file = file.path(Data.Path,"Fig7B_Data.csv"), row.names = FALSE)
 
 Legend.7B = ggplot() +
   geom_col(data = NTJ60.ddPCR %>% 
@@ -2567,6 +2655,11 @@ ggsave('Figures/7C_Pan99_M_STOP_Dilution_Series_FACS.pdf',
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(NTJ76.Melt %>% filter(Gate %in% c("HAgM1","HAgM2",
+                                                       "M1gM2","M2gM1")),
+          file = file.path(Data.Path,"Fig7C_Data.csv"), row.names = FALSE) # The g stands for "given", as in "HA+ | M1+"
+
 # Figure 7D: WT / M.STOP Ratios ----
 
 Measures = c("NS_ddPCR","M_ddPCR","HA_FACS","PFU","TCID50","GPID50")
@@ -2706,6 +2799,9 @@ ggsave('Figures/7D_Pan99_WT_vs_M_STOP_Ratios.pdf',
        height = 5,
        unit = "in")
 
+write.csv(NTJ60.Ratios,
+          file = file.path(Data.Path,"Fig7D_Data.csv"), row.names = FALSE)
+
 NTJ60.Ratios
 ```
 
@@ -2778,6 +2874,9 @@ ggsave('Figures/8A_Pan99_WT_M_STOP_Shedding_Comparison.pdf',
        height = 5,
        unit = "in")
 
+write.csv(GP_NS,
+          file = file.path(Data.Path,"Fig8A_Data.csv"), row.names = FALSE)
+
 Legend.8A = Fig.8 +
   geom_line(data = GP_NS,
             aes(x = Day,
@@ -2833,6 +2932,9 @@ ggsave('Figures/8B_Pan99_WT_Shedding_High_vs_Low_Dose.pdf',
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(NTJ77 %>% filter(Dose != "Neg"),
+          file = file.path(Data.Path,"Fig8B_Data.csv"), row.names = FALSE)
 
 Legend.8B = Fig.8 +
   geom_line(data = NTJ77 %>% filter(Dose != "Neg"),
@@ -2893,6 +2995,9 @@ ggsave('Figures/8C_Pan99_WT_vs_M_STOP_Transmission_RNA.pdf',
        height = 5,
        unit = "in")
 
+write.csv(NTJ74.Long %>% filter(Strain == "WT"),
+          file = file.path(Data.Path,"Fig8C_Data.csv"), row.names = FALSE)
+
 Fig.8 +
   geom_line(data = NTJ74.Long %>% filter(Strain == "M.STOP"),
             aes(x = Day,
@@ -2912,6 +3017,9 @@ ggsave('Figures/8D_Pan99_WT_vs_M_STOP_Transmission_RNA.pdf',
        width = 10,
        height = 5,
        unit = "in")
+
+write.csv(NTJ74.Long %>% filter(Strain == "M.STOP"),
+          file = file.path(Data.Path,"Fig8D_Data.csv"), row.names = FALSE)
 
 Legend.Fig.8C = Fig.8 +
   geom_line(data = NTJ74.Long,
@@ -3038,5 +3146,8 @@ ggsave('Figures/Supp5B_M1_M2_Ratio.pdf',
        width = 5,
        height = 5,
        unit = "in")
+
+write.csv(MSTOP.ddPCR,
+          file = file.path(Data.Path,"Supp5B_Data.csv"), row.names = FALSE)
 
 ```
