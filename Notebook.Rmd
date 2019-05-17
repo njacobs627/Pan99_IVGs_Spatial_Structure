@@ -2308,6 +2308,9 @@ ggsave('Figures/6B_Max_Semi.pdf',
        height = 5,
        unit = "in")
 
+write.csv(NTJ21.Peak,
+          file = file.path(Data.Path,"Fig6B_Full_Data.csv"), row.names = FALSE)
+
 write.csv(df1,
           file = file.path(Data.Path,"Fig6B_Data.csv"), row.names = FALSE)
 
