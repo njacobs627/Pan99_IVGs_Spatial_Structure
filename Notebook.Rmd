@@ -38,7 +38,7 @@ Data.Path = file.path(Proj.Home,"Data")
 setwd(Proj.Home)
 ```
 
-```{r Figure 1, eval = TRUE}
+```{r Figure 1, eval = FALSE}
 Pp.Calc = function(SCA.Sub,Rep) { # Calculates segment-specific Pp values
   # Argument = a matrix with rows of cells and columns (PB2...NS,var.PB2,var.PB1,WT,var)
   
@@ -952,7 +952,7 @@ ggsave(file.path(Data.Path,"Figures/1B_Predicted_Reassortment.pdf"),
 ```
 
 
-```{r Figure 2, eval = TRUE}
+```{r Figure 2, eval = FALSE}
 
 Pp = seq(from = 0.01, to = 1, by = 0.01)
 tau = matrix(nrow = 1,
@@ -1250,28 +1250,6 @@ one.mat = matrix(nrow = 8,
 
 ```{r Figure 3, eval = TRUE}
 
-# Import Data ----
-Sim3=read.csv(file.path(Data.Path,"NTJ_Sim3_Summary_Data.csv"),sep=",",header=TRUE)
-
-Sim3=subset(Sim3,MOI>0)
-Sim3$Infected=as.numeric(Sim3$Infected)
-
-# Output: 
-#     % Productive vs. MOI -- how many is enough/what is the point of diminishing returns?
-#     Segments/Cell vs. MOI -- slower accumulation of segments at lower Pp
-#     % Populations infected vs. MOI -- What is the infectious dose (MOI) at the population level?
-
-# Misc Plots ----
-
-Sum.Sim3 = Sim3 %>%
-  mutate(MOI = (MOI)) %>%
-  group_by(MOI,Pp) %>%
-  summarise(Segments = mean(Segments),
-            Productive = mean(Productive),
-            Infected = mean(Infected) * 100,
-            Semi = mean(Semi),
-            Infected_Cells = mean(Infected_Cells),
-            Semi_Prop = mean(Semi) / mean(Infected_Cells))
 Fig.3 = ggplot() +
     theme(text=element_text(size=14,face="bold"),
         strip.text.x=element_text(size=rel(1.5),margin=margin(0,0,3,0)),
@@ -1291,50 +1269,50 @@ Fig.3 = ggplot() +
         panel.background = element_blank(),
         legend.position = "NA")
 
-Fig.3 +
-  geom_line(data = Sum.Sim3 %>% filter(Pp != 0.58),aes(x = log10(MOI),
-                           y = Segments,
-                           color = Pp,
-                           group = Pp), lwd = 1) +
-  scale_color_viridis(guide = FALSE) +
-  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
-       y = TeX("\\textbf{Segments / Cell}"),
-       color = NULL) +
-
-ggsave('Misc_Plots/Population_Segments_Per_Cell.pdf',
-       width = 4,
-       height = 4,
-       unit = "in")
-
-# % Cells Productive vs. MOI
-
-Fig.3 +
-  geom_line(data=Sum.Sim3 %>% filter(Pp != 0.58),aes(x = log10(MOI),
-                              y = Productive,
-                              color = Pp,
-                              group = Pp), lwd = 1) +
-  scale_color_viridis(guide = FALSE) +
-  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
-       y = TeX("\\textbf{% Cells Productive}"),
-       color = NULL)
-
-ggsave('Misc_Plots/Population_Percent_Cells_Productive.pdf',
-       width = 4,
-       height = 4,
-       unit = "in")
-
 # Figure 3A: Populations Infected vs. MOI ----
 
-Fig.3 +
-  geom_line(data=Sum.Sim3 %>% filter(Pp != 0.58),
-            aes(x = log10(MOI),
-                y = Infected,
-                color = Pp,
-                group = Pp),
+pp = c(1:10/10,0.58)
+moi = 10^(seq(from = -4, to = 2, by = 0.01))
+n = 1:5000
+
+df1 = matrix(nrow = length(n) * length(moi) * length(pp),
+             ncol = 3,
+             data = 0) %>% data.frame
+
+colnames(df1) = c("PP","MOI","n")
+
+df1$PP = rep(pp, times = length(n),each = length(moi))
+df1$MOI = rep(moi, times = length(n) * length(pp))
+df1$N = rep(n,each = length(moi) * length(pp))
+
+df2 = df1 %>%
+  mutate(p_N = dpois(x = N, lambda = MOI),
+         p_Complete_from_N = (1 - (1 - PP) ^ N) ^ 8,
+         p_Incomplete_from_N = 1 - p_Complete_from_N,
+         p_Complete = p_N * p_Complete_from_N,
+         p_Incomplete = p_N * p_Incomplete_from_N) %>%
+  group_by(PP,MOI) %>%
+  summarise(p_Complete = sum(p_Complete),
+            p_Incomplete = sum(p_Incomplete) / (p_Complete + sum(p_Incomplete)))
+Fig.6A.Data = df2 # for 
+
+df3 = df2 %>%
+  ungroup() %>%
+  mutate(p_Infected_Comp = pmin(p_Complete * 1e4,1),
+         p_Infected_NoComp = pmin(1 / PP^8 * MOI * 1e4,1))
+
+# Fig. 3A ---- p(Infection) vs. MOI
+
+Fig.3 + 
+  geom_line(data = df3 %>% filter(PP != 0.58),
+            aes(x = MOI %>% log10,
+                y = p_Infected_Comp,
+                group = PP,
+                color = PP),
             lwd = 1) +
   scale_color_viridis(guide = FALSE) +
-  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
-       y = TeX("\\textbf{% Populations Infected}"),
+  labs(x = TeX("\\textbf{MOI (log_1_0 virions / cell)}"),
+       y = TeX("\\textbf{% populations infected}"),
        color = NULL)
 
 ggsave('Figures/3A_Populations_Infected.pdf',
@@ -1342,56 +1320,45 @@ ggsave('Figures/3A_Populations_Infected.pdf',
        height = 5,
        unit = "in")
 
-write.csv(Sum.Sim3 %>% filter(Pp != 0.58) %>% dplyr::select(Pp,MOI,Infected), 
+write.csv(df3 %>% dplyr::select(PP,MOI,p_Infected_Comp), 
           file = file.path(Data.Path,"Fig3A_Data.csv"), row.names = FALSE)
 
 # Figure 3B: Population ID50 vs. Pp ----
 
-Pop.ID50 = matrix(nrow = 10,
-                  ncol = 4,
-                  data = 0)
+df4 = df3 %>% 
+  filter(p_Infected_Comp >= 0.5) %>%
+  group_by(PP) %>%
+  summarise(min_Comp_MOI = min(MOI))
+df5 = df3 %>% 
+  filter(p_Infected_NoComp >= 0.5) %>%
+  group_by(PP) %>%
+  summarise(min_NoComp_MOI = min(MOI))
 
-colnames(Pop.ID50) = c("Pp","ID50","Low95","High95")
-Pop.ID50[,"Pp"] = 1:10 / 10
+df5 = matrix(nrow = 10,
+             ncol = 2,
+             data = 0) %>% data.frame
 
-for (p in 1:9) {
-  model = drm(data = Sum.Sim3 %>% filter(Pp == (p / 10), Infected < 100),
-      formula = Infected ~ MOI,
-      fct = LL.5()) %>%
-    ED(50)
-  Pop.ID50[p,"ID50"] = model[,1]
-  Pop.ID50[p,"Low95"] = model[,1] - 1.96 * model[,2]
-  Pop.ID50[p,"High95"] = model[,1] + 1.96 * model[,2]
-}
-Pop.ID50[10,"ID50"] = 1e-5
+colnames(df5) = c("PP","NoComp_MOI")
 
-Pop.ID50 = data.frame(Pop.ID50)
-Pop.ID50$ID50 = log10(Pop.ID50$ID50)
-Pop.ID50$Low95 = log10(Pop.ID50$Low95)
-Pop.ID50$High95 = log10(Pop.ID50$High95)
+df5$PP = seq(from = 0.1, to = 1, by = 0.1)
+df5$min_NoComp_MOI = 1 / 1e4 / df5$PP^8
 
-Pop.ID50$Num_Full = 1 / (Pop.ID50$Pp ^ 8)
-Pop.ID50$MOI_Full = (Pop.ID50$Num_Full / 1e5) %>% log10
+# Figure 3B: Population ID50 vs. Pp ----
 
 Fig.3 +
-  geom_line(data = Pop.ID50[1:9,],
-            aes(x = Pp,
-                y = ID50),
+  geom_line(data = df4 %>% filter(PP != 0.58),
+            aes(x = PP,
+                y = min_Comp_MOI %>% log10),
             lwd = 1) +
-  geom_line(data = Pop.ID50[1:9,],
-            aes(x = Pp,
-                y = MOI_Full),
-            lty = 2,
-            lwd = 1) +
-  geom_ribbon(data = Pop.ID50[1:9,],
-              aes(x = Pp,
-                  ymin = Low95,
-                  ymax = High95),
-              alpha = 0.3) +
+  geom_line(data = df5 %>% filter(PP != 0.58),
+            aes(x = PP,
+                y = min_NoComp_MOI %>% log10),
+            lwd = 1,
+            lty = 2) +
   scale_x_continuous(limits = c(0,1), breaks = c(0,0.25,0.5,0.75,1)) +
-  scale_y_continuous(limits = c(-5,3), breaks = c(-4,-2,0,2)) +
+  scale_y_continuous(limits = c(-4,5), breaks = c(-4,-2,0,2,4)) +
   labs(x = TeX("\\textbf{P_P}"),
-       y = TeX("\\textbf{Population ID_5_0 (log_1_0 Virions / Cell)}")) +
+       y = TeX("\\textbf{Population ID_5_0 (log_1_0 virions / cell)}")) +
   theme(text = element_text(size=14,face="bold"))
 
 ggsave('Figures/3B_Population_ID50.pdf',
@@ -1399,22 +1366,8 @@ ggsave('Figures/3B_Population_ID50.pdf',
        height = 5,
        unit = "in")
 
-write.csv(Pop.ID50 %>% rename(Complementation_ID50 = ID50, No_Complementation_ID50 = MOI_Full) %>% select(Pp, Complementation_ID50, No_Complementation_ID50),file = file.path(Data.Path,"Fig3B_Data.csv"), row.names = FALSE)
-
-Fig.3 +
-  geom_line(data=Sum.Sim3,aes(x = log10(MOI),
-                              y = Semi,
-                              color = Pp,
-                              group = Pp), lwd = 1.2) +
-  scale_color_viridis(guide = FALSE) +
-  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
-       y = TeX("\\textbf{% Cells Semi-Infected}"),
-       color = NULL)
-
-ggsave('Misc_Plots/Population_Percent_Cells_with_IVGs.pdf',
-       width = 4,
-       height = 4,
-       unit = "in")
+Pop.ID50 = right_join(df4,df5)
+write.csv(Pop.ID50 %>% rename(Complementation_ID50 = min_Comp_MOI, No_Complementation_ID50 = min_NoComp_MOI) %>% select(PP, Complementation_ID50, No_Complementation_ID50),file = file.path(Data.Path,"Fig3B_Data.csv"), row.names = FALSE)
 
 ```
 
@@ -1440,7 +1393,7 @@ write.csv(NTJ21.Peak,file=file.path(Data.Path,"NTJ21_Peak_Data.csv"),row.names=F
 write.csv(NTJ21.Hours,file=file.path(Data.Path,"NTJ21_Hours_Data.csv"),row.names=FALSE)
 ```
 
-```{r Figure 4, eval = TRUE}
+```{r Figure 4, eval = FALSE}
 
 # Import Data ----
 NTJ21.Peak = read.csv(file = file.path(Data.Path,"NTJ21_Peak_Data.csv")) %>%
@@ -1928,7 +1881,7 @@ ggsave(Fig.4.Legend,
 
 ```
 
-```{r Figure 5, eval = TRUE}
+```{r Figure 5, eval = FALSE}
 
 # Import Data ----
 Cell.Num = 6.4e5
@@ -2257,14 +2210,14 @@ Fig.6 = ggplot() +
         panel.background = element_blank())
   
 # Figure 6A: Percent Infected Cells Containing IVGs vs. MOI ----
+
 Fig.6 +
-  geom_line(data = Sum.Sim3 %>% filter(Pp %in% c(0.58)),
+  geom_line(data = Fig.6A.Data %>% filter(PP == 0.58),
             aes(x = log10(MOI),
-                y = Semi_Prop * 100,
-                group = Pp), lwd = 1.2, color = "black") +
-  scale_color_viridis(guide = FALSE, begin = 0.1, end = 0.9) +
-  labs(x = TeX("\\textbf{MOI (log_1_0 Virions / Cell)}"),
-       y = TeX("\\textbf{% Infected Cells with IVGs}")) +
+                y = p_Incomplete * 100), 
+            lwd = 1.2, color = "black") +
+  labs(x = TeX("\\textbf{MOI (log_1_0 virions / cell)}"),
+       y = TeX("\\textbf{% infected Cells with iVGs}")) +
   scale_x_continuous(limits = c(-2,2)) 
 
 ggsave('Figures/6A_Proportion_Infected_Cells_with_IVGs.pdf',
@@ -2272,7 +2225,7 @@ ggsave('Figures/6A_Proportion_Infected_Cells_with_IVGs.pdf',
        height = 5,
        unit = "in")
 
-write.csv(Sum.Sim3 %>% filter(Pp %in% c(0.58)),
+write.csv(Fig.6A.Data %>% filter(PP == 0.58),
           file = file.path(Data.Path,"Fig6A_Data.csv"), row.names = FALSE)
 
 # Figure 6B: Peak # Cells with IVGs vs. Diffusion Coefficient ----
