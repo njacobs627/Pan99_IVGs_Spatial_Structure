@@ -1109,9 +1109,15 @@ Fig.2 +
               alpha = 0.3) +
   geom_point(data = Inf.Unit.Sum,
              aes(x = Pp,
-                 y = Full,
+                 #y = Full,
+                 y = 0,
                  color = factor(Rep)),
              size = 2) +
+      geom_segment(data = Inf.Unit.Sum,
+               aes(x = Pp, xend = Pp,
+                   y = 0, yend = Full,
+                   color = factor(Rep)),
+               lty = 1) +
   geom_segment(aes(y = Inf.Unit.Sum$Full %>% mean,
                    yend = Inf.Unit.Sum$Full %>% mean,
                    # y = 1.22,
@@ -1119,11 +1125,12 @@ Fig.2 +
              x = 0,
              xend = 0.58),
              linetype = 2) +
+
   xlab(bquote(bold(P[P]))) +
   scale_color_tableau(palette = "Tableau 20") +
   scale_y_continuous(breaks = c(1.2,25,50,75,100)) +
 #  annotate("text",x = 0.3, y = 80,size = 5,label = TeX("\\textbf{1.22% (0 - 30.5) virions fully infectious}")) +
-  ylab("% Fully Infectious Virions")
+  ylab("% fully infectious virions")
 
 ggsave("Figures/2B_Percent_Fully_Infectious_Particles.pdf",
        dpi = 300,
@@ -1180,7 +1187,7 @@ Fig.2 +
                 y = Inf.Unit),
             lwd = 1) +
     labs(x=bquote(bold(P[P])),
-         y="Infectious Unit (# Virions)") +
+         y="Infectious unit (# virions)") +
   scale_y_continuous(breaks = c(0,3.6,10,20,30,40,50),
                      limits = c(0,55)) +
   geom_ribbon(data = Geom %>% filter(Pp > 0.03),
@@ -1190,15 +1197,25 @@ Fig.2 +
               alpha = 0.3) +
   geom_point(data = Inf.Unit.Sum,
              aes(x = Pp,
-                 y = Inf.Unit,
+                 #y = Inf.Unit,
+                 y = 0,
                  color = factor(Rep)),
              size = 2) +
+    geom_segment(data = Inf.Unit.Sum,
+               aes(x = Pp, xend = Pp,
+                   y = 0, yend = Inf.Unit,
+                   color = factor(Rep)),
+               lty = 1) +
   guides(color = FALSE) +
   xlab(bquote(bold(P[P]))) +
   scale_color_tableau(palette = "Tableau 20") +
-  geom_segment(aes(x = 0, xend = 0.52,
+  geom_segment(aes(x = 0, xend = 0.58,
                    y = 3.6, yend = 3.6),
                lty = 2) +
+  # geom_segment(aes(x = 0.58, xend = 0.58,
+  #                  y = 0, yend = 3.6),
+  #              lty = 2) +
+
 #  annotate("text",x = 0.6, y = 40,size = 5,label = TeX("\\textbf{Infectious Unit = 3.6 (1 - 6.5) virions}")) +
 
 ggsave("Figures/2D_Infectious_Unit_with_Data.pdf",
@@ -1271,9 +1288,11 @@ Fig.3 = ggplot() +
 
 # Figure 3A: Populations Infected vs. MOI ----
 
-pp = c(1:10/10,0.58)
-moi = 10^(seq(from = -4, to = 2, by = 0.01))
-n = 1:5000
+pp = c(seq(from = 0.1, to = 1, by = 0.1), 0.58)
+moi = 10^(seq(from = -6, to = 3, by = 0.01))
+n = 1:1000
+
+Cell.Num = 1e6
 
 df1 = matrix(nrow = length(n) * length(moi) * length(pp),
              ncol = 3,
@@ -1283,36 +1302,41 @@ colnames(df1) = c("PP","MOI","n")
 
 df1$PP = rep(pp, times = length(n),each = length(moi))
 df1$MOI = rep(moi, times = length(n) * length(pp))
-df1$N = rep(n,each = length(moi) * length(pp))
+df1$V = rep(n,each = length(moi) * length(pp))
 
 df2 = df1 %>%
-  mutate(p_N = dpois(x = N, lambda = MOI),
-         p_Complete_from_N = (1 - (1 - PP) ^ N) ^ 8,
-         p_Incomplete_from_N = 1 - p_Complete_from_N,
-         p_Complete = p_N * p_Complete_from_N,
-         p_Incomplete = p_N * p_Incomplete_from_N) %>%
+  mutate(p_V = dpois(x = V, lambda = MOI),
+         p8_V_Comp = (1 - (1 - PP) ^ V) ^ 8,
+         p8_V_NoComp = 1 - (1 - PP^8)^V,
+         pIncomplete_V = 1 - (1 - (1 - PP) ^ V) ^ 8,
+         p8_NoComp = p_V * p8_V_NoComp,
+         p8_Comp = p_V * p8_V_Comp,
+         pIncomplete = p_V * pIncomplete_V) %>%
   group_by(PP,MOI) %>%
-  summarise(p_Complete = sum(p_Complete),
-            p_Incomplete = sum(p_Incomplete) / (p_Complete + sum(p_Incomplete)))
-Fig.6A.Data = df2 # for 
+  summarise(p8_NoComp = sum(p8_NoComp),
+            p8_Comp = sum(p8_Comp),
+            pIncomplete = sum(pIncomplete) / (sum(pIncomplete) + sum(p8_Comp)))
 
 df3 = df2 %>%
   ungroup() %>%
-  mutate(p_Infected_Comp = pmin(p_Complete * 1e4,1),
-         p_Infected_NoComp = pmin(1 / PP^8 * MOI * 1e4,1))
+  mutate(p_Infected_Comp = pmin(p8_Comp * Cell.Num,1),
+         p_Infected_NoComp = pmin(p8_NoComp * Cell.Num,1))
+
+Fig.6A.Data = df2
 
 # Fig. 3A ---- p(Infection) vs. MOI
 
 Fig.3 + 
   geom_line(data = df3 %>% filter(PP != 0.58),
             aes(x = MOI %>% log10,
-                y = p_Infected_Comp,
+                y = p_Infected_Comp * 100,
                 group = PP,
                 color = PP),
             lwd = 1) +
   scale_color_viridis(guide = FALSE) +
+  scale_x_continuous(breaks = c(-6,-4,-2,0), limits = c(-6,1)) +
   labs(x = TeX("\\textbf{MOI (log_1_0 virions / cell)}"),
-       y = TeX("\\textbf{% populations infected}"),
+       y = TeX("\\textbf{Expected % populations infected}"),
        color = NULL)
 
 ggsave('Figures/3A_Populations_Infected.pdf',
@@ -1334,15 +1358,6 @@ df5 = df3 %>%
   group_by(PP) %>%
   summarise(min_NoComp_MOI = min(MOI))
 
-df5 = matrix(nrow = 10,
-             ncol = 2,
-             data = 0) %>% data.frame
-
-colnames(df5) = c("PP","NoComp_MOI")
-
-df5$PP = seq(from = 0.1, to = 1, by = 0.1)
-df5$min_NoComp_MOI = 1 / 1e4 / df5$PP^8
-
 # Figure 3B: Population ID50 vs. Pp ----
 
 Fig.3 +
@@ -1356,7 +1371,7 @@ Fig.3 +
             lwd = 1,
             lty = 2) +
   scale_x_continuous(limits = c(0,1), breaks = c(0,0.25,0.5,0.75,1)) +
-  scale_y_continuous(limits = c(-4,5), breaks = c(-4,-2,0,2,4)) +
+  scale_y_continuous(limits = c(-6,2.1), breaks = c(-6,-4,-2,0,2)) +
   labs(x = TeX("\\textbf{P_P}"),
        y = TeX("\\textbf{Population ID_5_0 (log_1_0 virions / cell)}")) +
   theme(text = element_text(size=14,face="bold"))
@@ -2214,10 +2229,10 @@ Fig.6 = ggplot() +
 Fig.6 +
   geom_line(data = Fig.6A.Data %>% filter(PP == 0.58),
             aes(x = log10(MOI),
-                y = p_Incomplete * 100), 
+                y = pIncomplete * 100), 
             lwd = 1.2, color = "black") +
   labs(x = TeX("\\textbf{MOI (log_1_0 virions / cell)}"),
-       y = TeX("\\textbf{% infected Cells with iVGs}")) +
+       y = TeX("\\textbf{% infected cells with IVGs}")) +
   scale_x_continuous(limits = c(-2,2)) 
 
 ggsave('Figures/6A_Proportion_Infected_Cells_with_IVGs.pdf',

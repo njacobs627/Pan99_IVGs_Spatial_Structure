@@ -2,9 +2,9 @@
 
 require(tidyverse)
 
-pp = c(1:10/10)
-moi = 10^(seq(from = -4, to = 1, by = 0.05))
-n = 1:5000
+pp = seq(from = 0.1, to = 1, by = 0.1)
+moi = 10^(seq(from = -6, to = 3, by = 0.05))
+n = 1:1000
 
 df1 = matrix(nrow = length(n) * length(moi) * length(pp),
              ncol = 3,
@@ -14,19 +14,23 @@ colnames(df1) = c("PP","MOI","n")
 
 df1$PP = rep(pp, times = length(n),each = length(moi))
 df1$MOI = rep(moi, times = length(n) * length(pp))
-df1$N = rep(n,each = length(moi) * length(pp))
+df1$V = rep(n,each = length(moi) * length(pp))
 
 df2 = df1 %>%
-  mutate(p_N = dpois(x = N, lambda = MOI),
-         p_Complete_from_N = (1 - (1 - PP) ^ N) ^ 8,
-         p_Complete = p_N * p_Complete_from_N) %>%
+  mutate(p_V = dpois(x = V, lambda = MOI),
+         p8_V_Comp = (1 - (1 - PP) ^ V) ^ 8,
+         p8_V_NoComp = 1 - (1 - PP^8)^V,
+         p8_NoComp = p_V * p8_V_NoComp,
+         p8_Comp = p_V * p8_V_Comp) %>%
   group_by(PP,MOI) %>%
-  summarise(p_Complete = sum(p_Complete))
+  summarise(p8_NoComp = sum(p8_NoComp),
+            p8_Comp = sum(p8_Comp)) %>%
+  mutate(Comp_Benefit = p8_Comp / p8_NoComp)
 
 df3 = df2 %>%
   ungroup() %>%
-  mutate(p_Infected_Comp = pmin(p_Complete * 1e4,1),
-         p_Infected_NoComp = pmin(1 / PP^8 * MOI * 1e4,1))
+  mutate(p_Infected_Comp = pmin(p8_Comp * 1e6,1),
+         p_Infected_NoComp = pmin(p8_NoComp * 1e6,1))
 
 # Fig. 3A
 
@@ -36,6 +40,12 @@ ggplot() +
                 y = p_Infected_Comp,
                 group = PP,
                 color = PP)) +
+  geom_line(data = df3,
+            aes(x = MOI %>% log10,
+                y = p_Infected_NoComp,
+                group = PP,
+                color = PP),
+            lty = 2) +
   scale_color_viridis_c()
 
 df4 = df3 %>% 
@@ -46,13 +56,6 @@ df5 = df3 %>%
   filter(p_Infected_NoComp >= 0.5) %>%
   group_by(PP) %>%
   summarise(min_NoComp_MOI = min(MOI))
-
-df5 = matrix(nrow = 10,
-             ncol = 2,
-             data = 0) %>% data.frame
-colnames(df5) = c("PP","NoComp_MOI")
-df5$PP = seq(from = 0.1, to = 1, by = 0.1)
-df5$min_NoComp_MOI = 1 / 1e4 / PP^8
 
 #Fig. 3B
 ggplot() +
